@@ -24,6 +24,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
+- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit, `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; the current branch also **pull**s (fast-forward only).
   - a remote branch: **checkout** (a local branch tracking it), **merge into current**, **rebase current onto this**, **fetch**, **delete on remote**.
