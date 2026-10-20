@@ -177,7 +177,17 @@ test('an author gets initials and always the same color', () => {
 test('a merge that ends one branch and forks another keeps them in separate lanes', () => {
   // m0 is where the a-branch started, and it merges the s-branch: s2 must not take a's lane
   const commits = layout(parseLog(log([['m1', 'm0 a2'], ['a2', 'a1'], ['a1', 'm0'], ['m0', 'b s2'], ['s2', 'b'], ['b', '']]), new Set()))
-  assert.deepEqual(commits.map(draw), ['●─╮', '│ ●', '│ ●', '●─╯─╮', '│   ●', '●───╯'])
+  assert.deepEqual(commits.map(draw), ['●─╮', '│ ●', '│ ●', '●─┴─╮', '│   ●', '●───╯'])
   // s2 hangs from m0's fork, not from a lane that ended above it
   assert.equal(commits[4]?.cells.find(cell => cell.ch === '●')?.lane, 2)
+})
+
+test('a line passing through a join keeps going, in its own color, to the commit', () => {
+  const commits = layout(parseLog(log([['m1', 'm0 a2'], ['a2', 'a1'], ['a1', 'm0'], ['m0', 'b s2'], ['s2', 'b'], ['b', '']]), new Set()))
+  const join = commits[3]?.cells[2]
+  // The a-branch's join keeps its lane; the fork to s2's lane passes through it
+  assert.deepEqual(join, { ch: '╯', lane: 1, across: 2 })
+  const svg = curvesOf(commits[3]?.cells ?? [])
+  assert.match(svg, /<path d="M16 9.5H24" stroke="#00d90a"/)
+  assert.match(svg, /<path d="M20 0Q20 9.5 16 9.5" stroke="#d9008f"/)
 })

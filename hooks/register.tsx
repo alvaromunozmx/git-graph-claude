@@ -22,8 +22,8 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
-import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import type { Cell, Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -81,8 +81,6 @@ const RENAMING = atom(RENAMING_REF, null)
 const LANE_COLORS = ['blue', 'magenta', 'green', 'yellow', 'cyan', 'red']
 const REF_COLOR: Record<Ref['kind'], string> = { head: 'green', local: 'blue', remote: 'magenta', tag: 'yellow' }
 const NOTE_COLOR: Record<Note['kind'], string> = { ok: 'green', error: 'red', info: 'cyan' }
-// Glyphs whose stroke reaches the cell's sides: they get a full-width line behind them
-const CROSSING = new Set(['┼'])
 const AUTHOR_WIDTH = 14
 const DATE_WIDTH = 17
 const HASH_WIDTH = 7
@@ -1019,18 +1017,21 @@ function drawLit (Text: any, text: string, query: string, style: Record<string, 
 }
 
 /** One graph cell, in a box one column wide so every row lines up in a proportional font. */
-function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
-  const color = LANE_COLORS[lane % LANE_COLORS.length]
+function drawCell (Box: any, Text: any, cell: Cell, key: number) {
+  const color = LANE_COLORS[cell.lane % LANE_COLORS.length]
+  const ch = glyphOf(cell)
   // A horizontal line is drawn longer than its box and clipped: in a proportional font a
   // single ─ is narrower than the column, which left gaps in the merge lines
   if (ch === '─') {
     return <Box key={key} width={1} flexShrink={0} overflow="hidden"><Text color={color} wrap="truncate">{'────'}</Text></Box>
   }
-  if (CROSSING.has(ch)) {
+  if (cell.across !== undefined) {
+    // A line passes through: drawn behind, full width, in its own lane's color
+    const across = LANE_COLORS[cell.across % LANE_COLORS.length]
     return (
       <Box key={key} width={1} flexShrink={0} overflow="hidden">
-        <Box position="absolute" top={0} left={0}><Text color={color} wrap="truncate">{'────'}</Text></Box>
-        <Text color={color}>│</Text>
+        <Box position="absolute" top={0} left={0}><Text color={across} wrap="truncate">{'────'}</Text></Box>
+        <Text color={color}>{ch === '┼' ? '│' : ch}</Text>
       </Box>
     )
   }
@@ -1063,7 +1064,7 @@ function drawRow (
           )
         : (
           <Box width={graphWidth} flexShrink={0} flexDirection="row">
-            {cells.map((cell, i) => drawCell(Box, Text, cell.ch, cell.lane, i))}
+            {cells.map((cell, i) => drawCell(Box, Text, cell, i))}
           </Box>
           )}
       <Box flexGrow={1} flexShrink={1} height={1} overflow="hidden" flexDirection="row">

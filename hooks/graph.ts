@@ -224,9 +224,15 @@ export function layout (commits: Commit[]): Commit[] {
     for (const target of [...joining, ...forks]) {
       const [from, to] = target > col ? [2 * col + 1, 2 * target - 1] : [2 * target + 1, 2 * col - 1]
       for (const cell of cells.slice(from, to + 1)) {
-        cell.lane = target
-        if (cell.ch === ' ') cell.ch = '─'
-        else if (cell.ch === '│') cell.ch = '┼'
+        if (cell.ch === ' ' || cell.ch === '─') {
+          cell.ch = '─'
+          cell.lane = target
+        } else {
+          // A lane or another join or fork stands in the way: the line passes through it,
+          // and the cell keeps its own lane for what it draws
+          if (cell.ch === '│') cell.ch = '┼'
+          cell.across = target
+        }
       }
     }
 
@@ -321,11 +327,12 @@ export function curvesOf (cells: Cell[]): string {
     const x = i * w + w / 2
     const left = i * w
     const right = left + w
-    const line = (d: string) => parts.push(`<path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>`)
+    const line = (d: string, stroke = color) => parts.push(`<path d="${d}" stroke="${stroke}" stroke-width="2" fill="none" stroke-linecap="round"/>`)
+    // A line passing through goes under what the cell draws, in its own lane's color
+    if (cell.across !== undefined) line(`M${left} ${mid}H${right}`, CURVE_COLORS[cell.across % CURVE_COLORS.length])
     switch (cell.ch) {
-      case '│': line(`M${x} 0V${h}`); break
+      case '│': case '┼': line(`M${x} 0V${h}`); break
       case '─': line(`M${left} ${mid}H${right}`); break
-      case '┼': line(`M${left} ${mid}H${right}`); line(`M${x} 0V${h}`); break
       case '╮': line(`M${left} ${mid}Q${x} ${mid} ${x} ${h}`); break
       case '╭': line(`M${right} ${mid}Q${x} ${mid} ${x} ${h}`); break
       case '╯': line(`M${x} 0Q${x} ${mid} ${left} ${mid}`); break
@@ -369,7 +376,13 @@ export function avatarOf (name: string, size = 16): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/><text x="${r}" y="${r}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="${size * 0.45}" font-weight="600" fill="#fff">${text}</text></svg>`
 }
 
+/** A join or fork that a line passes through draws as a tee: `╮` becomes `┬`, `╯` becomes `┴`. */
+export function glyphOf (cell: Cell): string {
+  if (cell.across === undefined) return cell.ch
+  return cell.ch === '╮' || cell.ch === '╭' ? '┬' : cell.ch === '╯' || cell.ch === '╰' ? '┴' : cell.ch
+}
+
 /** The cells as plain text, for tests and for the transcript fallback. */
 export function draw (commit: Commit): string {
-  return commit.cells.map(cell => cell.ch).join('')
+  return commit.cells.map(glyphOf).join('')
 }
