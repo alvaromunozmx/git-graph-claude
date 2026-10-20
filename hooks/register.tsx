@@ -16,6 +16,7 @@
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow; stashes
 //   fork off the commit they were made on, to apply, pop, drop or branch from.
+// - The settings (lanes, avatars, columns, date format, what is dim) are kept between sessions.
 // - Keys, while the pane has the focus: j and k walk the commits, h goes to HEAD, s finds,
 //   f fetches, r reloads; Esc closes the pane.
 // - On desktop the lanes can be drawn as curves, an SVG per row, instead of glyphs.
@@ -23,8 +24,8 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
-import type { Cell, Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -48,6 +49,9 @@ const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
 const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
 const CURVES_REF = { plugin: 'git-graph', key: 'curves' } as const
 const AVATARS_REF = { plugin: 'git-graph', key: 'avatars' } as const
+const SHOW_AUTHOR_REF = { plugin: 'git-graph', key: 'showAuthor' } as const
+const SHOW_DATE_REF = { plugin: 'git-graph', key: 'showDate' } as const
+const DATE_FORMAT_REF = { plugin: 'git-graph', key: 'dateFormat' } as const
 const MUTE_OTHERS_REF = { plugin: 'git-graph', key: 'muteOthers' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
@@ -70,6 +74,10 @@ const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
 const CURVES = atom(CURVES_REF, false)
 const AVATARS = atom(AVATARS_REF, true)
+const SHOW_AUTHOR = atom(SHOW_AUTHOR_REF, true)
+const SHOW_DATE = atom(SHOW_DATE_REF, true)
+const DATE_FORMAT = atom(DATE_FORMAT_REF, 'absolute' as DateFormat)
+const DATE_FORMATS: DateFormat[] = ['absolute', 'relative', 'iso']
 const MUTE_OTHERS = atom(MUTE_OTHERS_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
@@ -105,6 +113,7 @@ export const register: Register = (on, options) => {
       argumentHint: '[all | current]',
       immediate: true
     })
+    await loadSettings($)
     return next(e)
   })
 
@@ -187,6 +196,7 @@ function reload ($: Engine): Promise<void> {
 
 async function load ($: Engine) {
   const allBranches = await read($, ALL)
+  const dateFormat = await read($, DATE_FORMAT)
   let filter = await read($, FILTER)
   let graph: Graph
   try {
@@ -202,11 +212,11 @@ async function load ($: Engine) {
       git($, ['rev-parse', 'HEAD']).catch(() => ''),
       git($, ['status', '--porcelain=v1', '-uall']).catch(() => ''),
       // Stashes belong with every branch, not with one drawn alone
-      filter === null && allBranches ? git($, ['stash', 'list', `--format=${STASH_FORMAT}`, '--date=format:%d %b %Y %H:%M']).catch(() => '') : Promise.resolve(''),
+      filter === null && allBranches ? git($, ['stash', 'list', `--format=${STASH_FORMAT}`, DATE_ARGS[dateFormat]]).catch(() => '') : Promise.resolve(''),
       git($, [
         // The stash ref is drawn from the stash list instead, one row per stash
         'log', ...(filter !== null ? [filter] : allBranches ? ['--exclude=refs/stash', '--all'] : []), '--topo-order', `-n${limit}`,
-        `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M', '--'
+        `--format=${FORMAT}`, DATE_ARGS[dateFormat], '--'
       ])
     ])
     const repos = await listRepos($)
@@ -453,6 +463,64 @@ async function find ($: Engine, value: string) {
 
 async function toggleCompact ($: Engine) {
   await $.state.set(COMPACT_REF, !(await read($, COMPACT)))
+  await saveSettings($)
+}
+
+async function toggleShowAuthor ($: Engine) {
+  await $.state.set(SHOW_AUTHOR_REF, !(await read($, SHOW_AUTHOR)))
+  await saveSettings($)
+}
+
+async function toggleShowDate ($: Engine) {
+  await $.state.set(SHOW_DATE_REF, !(await read($, SHOW_DATE)))
+  await saveSettings($)
+}
+
+/** absolute → relative → iso: the dates are read again from git in the new format. */
+async function cycleDateFormat ($: Engine) {
+  const now = await read($, DATE_FORMAT)
+  await $.state.set(DATE_FORMAT_REF, DATE_FORMATS[(DATE_FORMATS.indexOf(now) + 1) % DATE_FORMATS.length] ?? 'absolute')
+  await saveSettings($)
+  await reload($)
+}
+
+/** The settings, kept in the plugin's store so the next session draws the same way. */
+async function saveSettings ($: Engine) {
+  const settings = {
+    compact: await read($, COMPACT),
+    curves: await read($, CURVES),
+    avatars: await read($, AVATARS),
+    showAuthor: await read($, SHOW_AUTHOR),
+    showDate: await read($, SHOW_DATE),
+    dateFormat: await read($, DATE_FORMAT),
+    muteMerges: await read($, MUTE_MERGES),
+    muteOthers: await read($, MUTE_OTHERS)
+  }
+  await $.store.set('settings', settings).catch(() => undefined)
+}
+
+/** Reads the kept settings back; a value of the wrong kind keeps its default. */
+async function loadSettings ($: Engine) {
+  const saved = await $.store.get('settings').catch(() => undefined)
+  if (typeof saved !== 'object' || saved === null) return
+  const value = saved as Record<string, unknown>
+  const flag = (key: string) => (typeof value[key] === 'boolean' ? value[key] as boolean : undefined)
+  const compact = flag('compact')
+  if (compact !== undefined) await $.state.set(COMPACT_REF, compact)
+  const curves = flag('curves')
+  if (curves !== undefined) await $.state.set(CURVES_REF, curves)
+  const avatars = flag('avatars')
+  if (avatars !== undefined) await $.state.set(AVATARS_REF, avatars)
+  const showAuthor = flag('showAuthor')
+  if (showAuthor !== undefined) await $.state.set(SHOW_AUTHOR_REF, showAuthor)
+  const showDate = flag('showDate')
+  if (showDate !== undefined) await $.state.set(SHOW_DATE_REF, showDate)
+  const muteMerges = flag('muteMerges')
+  if (muteMerges !== undefined) await $.state.set(MUTE_MERGES_REF, muteMerges)
+  const muteOthers = flag('muteOthers')
+  if (muteOthers !== undefined) await $.state.set(MUTE_OTHERS_REF, muteOthers)
+  const dateFormat = DATE_FORMATS.find(format => format === value.dateFormat)
+  if (dateFormat) await $.state.set(DATE_FORMAT_REF, dateFormat)
 }
 
 async function toggleSettings ($: Engine) {
@@ -461,18 +529,22 @@ async function toggleSettings ($: Engine) {
 
 async function toggleCurves ($: Engine) {
   await $.state.set(CURVES_REF, !(await read($, CURVES)))
+  await saveSettings($)
 }
 
 async function toggleAvatars ($: Engine) {
   await $.state.set(AVATARS_REF, !(await read($, AVATARS)))
+  await saveSettings($)
 }
 
 async function toggleMuteMerges ($: Engine) {
   await $.state.set(MUTE_MERGES_REF, !(await read($, MUTE_MERGES)))
+  await saveSettings($)
 }
 
 async function toggleMuteOthers ($: Engine) {
   await $.state.set(MUTE_OTHERS_REF, !(await read($, MUTE_OTHERS)))
+  await saveSettings($)
 }
 
 async function note ($: Engine, kind: Note['kind'], text: string) {
@@ -898,6 +970,9 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   // Only a surface that draws SVG gets curves
   const curves = Boolean(ui.Svg) && (await read($, CURVES))
   const avatars = await read($, AVATARS)
+  const showAuthor = await read($, SHOW_AUTHOR)
+  const showDate = await read($, SHOW_DATE)
+  const dateFormat = await read($, DATE_FORMAT)
   const muteOthers = await read($, MUTE_OTHERS)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
@@ -965,7 +1040,11 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>lanes:</Text>
           <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />
           {ui.Svg && <Button key="curves" label={curves ? 'curves' : 'glyphs'} plain onPress={() => toggleCurves($)} />}
+          <Text dimColor>columns:</Text>
+          <Button key="show-author" label={`${showAuthor ? '☑' : '☐'} author`} plain onPress={() => toggleShowAuthor($)} />
           <Button key="avatars" label={`${avatars ? '☑' : '☐'} avatars`} plain onPress={() => toggleAvatars($)} />
+          <Button key="show-date" label={`${showDate ? '☑' : '☐'} date`} plain onPress={() => toggleShowDate($)} />
+          <Button key="date-format" label={`date: ${dateFormat}`} plain onPress={() => cycleDateFormat($)} />
           <Text dimColor>dim:</Text>
           <Button key="mute-merges" label={`${muteMerges ? '☑' : '☐'} merge commits`} plain onPress={() => toggleMuteMerges($)} />
           <Button key="mute-others" label={`${muteOthers ? '☑' : '☐'} commits HEAD does not reach`} plain onPress={() => toggleMuteOthers($)} />
@@ -998,8 +1077,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     return node === '●' ? cells : cells.map(cell => (cell.ch === '●' ? { ...cell, ch: node } : cell))
   }
   const graphWidth = Math.max(...visible.map(commit => cellsOf(commit).length)) + 1
-  const metaWidth = AUTHOR_WIDTH + DATE_WIDTH + 2 + (avatars ? AVATAR_WIDTH : 0)
-  const showMeta = columns >= graphWidth + metaWidth + HASH_WIDTH + 30
+  const metaWidth = (showAuthor ? AUTHOR_WIDTH + 1 + (avatars ? AVATAR_WIDTH : 0) : 0) + (showDate ? DATE_WIDTH + 1 : 0)
+  const showMeta = metaWidth > 0 && columns >= graphWidth + metaWidth + HASH_WIDTH + 30
   const textWidth = columns - graphWidth - HASH_WIDTH - 3 - (showMeta ? metaWidth + 1 : 0)
 
   // Dim, as the settings say: merges, and commits that are no ancestor of HEAD
@@ -1010,7 +1089,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', avatars, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
+    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', avatars, showAuthor, showDate, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
@@ -1080,7 +1159,7 @@ function drawCell (Box: any, Text: any, cell: Cell, key: number) {
 
 function drawRow (
   ui: Ui, $: Engine, commit: Commit, cells: Commit['cells'],
-  { curves, avatars, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { curves: boolean; avatars: boolean; graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
+  { curves, avatars, showAuthor, showDate, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { curves: boolean; avatars: boolean; showAuthor: boolean; showDate: boolean; graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
 ) {
   const { Box, Button, Svg, Text } = ui
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
@@ -1122,14 +1201,14 @@ function drawRow (
           {drawLit(Text, cut(commit.subject, room - (commit.stash ? commit.stash.length + 3 : 0)), query, { dimColor: (isMuted || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
-      {showMeta && (
+      {showMeta && showAuthor && (
         <Box width={AUTHOR_WIDTH + 1 + (avatars ? AVATAR_WIDTH : 0)} flexShrink={0} marginLeft={1} flexDirection="row">
           {avatars && commit.author !== '' && drawAvatar(ui, commit.author)}
           <Text dimColor wrap="truncate-end">{drawLit(Text, commit.author, query, {})}</Text>
         </Box>
       )}
-      {showMeta && (
-        <Box width={DATE_WIDTH + 1} flexShrink={0}>
+      {showMeta && showDate && (
+        <Box width={DATE_WIDTH + 1} flexShrink={0} marginLeft={showAuthor ? 0 : 1}>
           <Text dimColor wrap="truncate-end">{commit.date}</Text>
         </Box>
       )}

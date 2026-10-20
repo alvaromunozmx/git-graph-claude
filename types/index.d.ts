@@ -73,6 +73,9 @@ export type StashAction = 'stash-pop' | 'stash-drop'
 /** An action waiting for its confirming click: on a commit or stash (its hash) or on a ref (its name). */
 export type Pending = { action: CommitAction | RefAction | StashAction; hash: string }
 
+/** How the date column reads: `19 Oct 2026 10:00`, `3 hours ago`, or `2026-10-19 10:00`. */
+export type DateFormat = 'absolute' | 'relative' | 'iso'
+
 export type Note = { kind: 'ok' | 'error' | 'info'; text: string }
 
 declare module 'claude-code' {
@@ -95,6 +98,11 @@ declare module 'claude-code' {
       curves: boolean
       /** Each author has an avatar: their initials on their own color */
       avatars: boolean
+      /** The author column is drawn */
+      showAuthor: boolean
+      /** The date column is drawn */
+      showDate: boolean
+      dateFormat: DateFormat
       /** Merge commits are drawn dim */
       muteMerges: boolean
       /** Commits HEAD does not reach are drawn dim */

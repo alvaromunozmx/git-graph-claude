@@ -1,9 +1,16 @@
 // The pure part of Git Graph: reading `git log` and laying commits out in lanes.
 // Nothing here touches Claude Code, so it can be tested with plain Node.
-import type { Cell, Commit, FileChange, Forge, Ref } from '../types'
+import type { Cell, Commit, DateFormat, FileChange, Forge, Ref } from '../types'
 
 export const SEP = '\x1f'
 export const FORMAT = ['%H', '%P', '%D', '%an', '%ad', '%s'].join('%x1f')
+/** The `--date` git reads the date column with, per format. */
+export const DATE_ARGS: Record<DateFormat, string> = {
+  absolute: '--date=format:%d %b %Y %H:%M',
+  relative: '--date=relative',
+  iso: '--date=format:%Y-%m-%d %H:%M'
+}
+
 /** The hash of the row that stands for the working tree's uncommitted changes. */
 export const WORKTREE = 'worktree'
 

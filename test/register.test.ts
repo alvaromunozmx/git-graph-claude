@@ -630,3 +630,48 @@ test('a repo with no submodule has no repo picker', async ($, on) => {
   const ui = await mount($, 'desktop')
   expect(await ui.find({ key: 'repo' })).toBeUndefined()
 })
+
+test('the settings hide the author or date column and change the date format', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ type: 'Text', text: '19 Oct 2026 10:00' })).toBeDefined()
+    await ui.press({ key: 'show-date' })
+    expect(await ui.find({ type: 'Text', text: '19 Oct 2026 10:00' })).toBeUndefined()
+    await ui.press({ key: 'show-date' })
+    await ui.press({ key: 'show-author' })
+    expect(await ui.find({ type: 'Text', text: 'Ana' })).toBeUndefined()
+    await ui.press({ key: 'show-author' })
+    await ui.press({ key: 'date-format' })
+    expect(seen.git.findLast(args => args[0] === 'log')).toContain('--date=relative')
+    await ui.press({ key: 'date-format' })
+    expect(seen.git.findLast(args => args[0] === 'log')).toContain('--date=format:%Y-%m-%d %H:%M')
+    await ui.press({ key: 'date-format' })
+    expect((await ui.find({ key: 'date-format' }))?.props.label).toBe('date: absolute')
+    await ui.press({ key: 'settings' })
+  }
+})
+
+test('the settings are kept for the next session', async ($, on) => {
+  // The plugin's store, as the last session left it
+  const kept: Record<string, unknown> = { settings: { compact: true, showAuthor: false, dateFormat: 'iso', muteMerges: 'yes' } }
+  on('store.get', ($, e) => ({ value: kept[e.key] }))
+  on('store.set', ($, e) => {
+    kept[e.key] = e.value
+    return { value: undefined }
+  })
+  const seen = world(on)
+  await $.session.start({ cwd: CWD, surface: 'desktop', isInteractive: true })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(seen.git.findLast(args => args[0] === 'log')).toContain('--date=format:%Y-%m-%d %H:%M')
+  expect(await ui.find({ type: 'Text', text: 'Ana' })).toBeUndefined()
+  await ui.press({ key: 'settings' })
+  expect((await ui.find({ key: 'compact' }))?.props.label).toBe('compact')
+  // A value of the wrong kind keeps its default
+  expect((await ui.find({ key: 'mute-merges' }))?.props.label).toBe('☑ merge commits')
+  await ui.press({ key: 'avatars' })
+  expect(kept.settings).toMatchObject({ compact: true, avatars: false, dateFormat: 'iso' })
+})
