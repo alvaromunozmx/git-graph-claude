@@ -61,9 +61,9 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
-Uncommitted changes, opened: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**.
+Uncommitted changes, opened from their `*******`: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**, here with a new file's diff open.
 
-<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
+<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, one with its diff open, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
 
 A commit, opened: its actions in groups, the author and date, its lines added and deleted, its message with links, and its files, each opening its diff.
 
