@@ -4,6 +4,13 @@ A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your br
 
 <img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src=".github/screenshot.png" />
 
+## Requirements
+
+- **Claude Code with mods.** Git Graph is a *mod*: a plugin with a hooks module, which Claude Code runs as an early-access feature. It was built and tested on Claude Code 2.1.299 (Claude Desktop's Code tab) and 2.1.304 (terminal). Where mods are turned off for an account or a build, the plugin installs but `/git-graph` does not appear.
+- **git** on the `PATH`, and a folder inside a git repository (submodules are picked from the repo picker).
+- **Claude Desktop's Code tab or the Claude Code terminal.** It is not tested in Cowork.
+- Nothing else to install: no Node, no build step. Node 22.6+ is only needed to develop it (see Development).
+
 ## Install
 
 In a terminal session:
@@ -25,6 +32,13 @@ In Claude Desktop's Code tab, where `/plugin` does not run: click **+** next to 
 Don't upload `git-graph.zip` in Settings → Plugins → Upload a plugin: that reaches Cowork, not the Code tab.
 
 Then run `/reload-plugins` (or start a new session) and `/git-graph`.
+
+### If `/git-graph` doesn't appear
+
+1. Run `/reload-plugins`, or start a new session: a session loads its plugins when it starts.
+2. Run `/plugin` and look for an error next to `git-graph`; `claude plugin list` from a shell shows whether it is installed and enabled.
+3. Check your Claude Code version with `claude --version`: older builds may not run mods, or run an older version of their API.
+4. If it is installed, enabled and error-free and still missing, mods are likely off for your account or build for now.
 
 ## Use
 
