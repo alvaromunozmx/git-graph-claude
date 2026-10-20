@@ -1,6 +1,6 @@
 {
   "name": "git-graph-claude",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "A Git Graph pane for Claude Code",
   "type": "module",
