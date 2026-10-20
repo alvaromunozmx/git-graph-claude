@@ -789,6 +789,32 @@ test('a commit panel has a title, quick links and its actions in groups', async 
   }
 })
 
+/** An element's descendants as drawn, itself first, each with its tag and key. */
+function descendants (element: unknown): Array<{ type: string; key: unknown }> {
+  if (!element || typeof element !== 'object') return []
+  const found = element as { type: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
+  return [{ type: found.type, key: found.key ?? found.props?.key }, ...(found.children ?? []).flatMap(descendants)]
+}
+
+test('the terminal draws a panel\'s web link under its title, so the title reads whole', async ($, on) => {
+  world(on, { remote: args => (args[0] === 'get-url' ? 'git@github.com:o/r.git\n' : 'origin\n') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    expect(await ui.find({ type: 'Text', text: 'Commit b2' })).toBeDefined()
+    expect((await ui.find({ type: 'Link' }))?.props).toMatchObject({ href: 'https://github.com/o/r/commit/b2', label: '↗ github.com' })
+    // The title's row: the one that holds the title and its copy buttons, not the actions under them
+    const rows = await ui.findAll({ type: 'Box' })
+    const titleRow = rows.find(row => row.props.flexDirection === 'row' && row.text.includes('Commit b2') &&
+      descendants(row).some(e => e.key === 'copy-subject') && !descendants(row).some(e => e.key === 'revert'))
+    expect(titleRow).toBeDefined()
+    // The terminal draws a Link's URL beside its label, so there it leaves the title's row;
+    // desktop draws the label alone, beside the copy buttons
+    expect(descendants(titleRow).some(e => e.type === 'Link')).toBe(surface === 'desktop')
+    await ui.press({ key: 'hash-b2' })
+  }
+})
+
 test('the keys answer with the settings closed: their buttons stay in the header', async ($, on) => {
   world(on)
   await $.command.run(typed(''))
