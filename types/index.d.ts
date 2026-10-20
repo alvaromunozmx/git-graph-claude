@@ -43,6 +43,8 @@ export type Graph = {
   head: string
   /** The first remote's web address, when it has one */
   forge: Forge | null
+  /** The session's repo and its submodules, for the repo picker: absolute paths */
+  repos: { path: string; label: string }[]
   error: string | null
   loadedAt: number
 }
@@ -81,6 +83,8 @@ declare module 'claude-code' {
       detail: Detail
       diff: Diff
       allBranches: boolean
+      /** The repo drawn: a submodule's absolute path; null: the session's own */
+      repo: string | null
       /** One branch to draw alone, picked in the header; null: every branch or the current one */
       branchFilter: string | null
       shown: number

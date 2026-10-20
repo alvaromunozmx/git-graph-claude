@@ -48,6 +48,14 @@ export function parseTagInput (value: string): { name: string; message?: string 
   return message === '' ? { name: value.slice(0, colon).trim() } : { name: value.slice(0, colon).trim(), message }
 }
 
+/** `git submodule status --recursive` → the paths of the submodules checked out (not `-` ones). */
+export function parseSubmodules (stdout: string): string[] {
+  return stdout.split('\n').filter(line => line.length > 1 && line[0] !== '-').map(line => {
+    const [, path = ''] = line.slice(1).split(' ')
+    return path
+  }).filter(Boolean)
+}
+
 /** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */
 export const DIFF_LIMIT = 60000
 

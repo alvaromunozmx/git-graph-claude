@@ -21,6 +21,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
 - **Stashes** (◈) fork off the commit they were made on, while every branch is drawn. Open one to **apply** it, **pop** it, make a **branch…** from it or **drop** it.
 - **⚙** opens the settings row: **spaced / compact** lanes (with a gap, or side by side), **glyphs / curves** (in Claude Desktop, lanes drawn as SVG curves and dots, like Git Graph), **avatars** (each author's initials on their own color; real pictures would need network access the pane does not have), and which commits are drawn dim: **merge commits** (on by default, like Git Graph) and **commits HEAD does not reach**.
+- **The repo picker** appears when the repo has submodules checked out: pick one to draw its history, with every action working there.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
