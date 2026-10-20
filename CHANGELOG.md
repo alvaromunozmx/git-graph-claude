@@ -7,6 +7,7 @@ Every version of Git Graph for Claude Code, newest first. Each release on GitHub
 - **Docs:** The uncommitted changes screenshot with the new header and a diff open
 - **Docs:** Requirements, and what to check when /git-graph doesn't appear
 - **Docs:** Four short GIFs of the pane in the README
+- **Docs:** Requirements for mods as Claude Code ships them now, and what the plugin runs and sends
 
 ## 0.3.33 — 2026-10-20
 
