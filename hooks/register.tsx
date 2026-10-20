@@ -1312,7 +1312,7 @@ function drawRow (
         </Box>
       )}
       <Box width={HASH_WIDTH + 2} flexShrink={0} justifyContent="flex-end">
-        <Button key={`hash-${commit.hash}`} label={commit.kind === 'worktree' ? '*' : commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
+        <Button key={`hash-${commit.hash}`} label={commit.kind === 'worktree' ? '*'.repeat(HASH_WIDTH) : commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
       </Box>
     </Box>
   )
