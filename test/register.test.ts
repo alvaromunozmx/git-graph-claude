@@ -145,6 +145,8 @@ test('uncommitted changes get a row above HEAD that lists them', async ($, on) =
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     expect(await ui.find({ type: 'Text', text: 'Uncommitted Changes (2)' })).toBeDefined()
+    // As wide as a hash, so it is as easy to press
+    expect((await ui.find({ key: 'hash-worktree' }))?.props.label).toBe('*******')
     expect(await ui.find({ type: 'Text', text: '● 2 uncommitted' })).toBeDefined()
     await ui.press({ key: 'hash-worktree' })
     expect(await ui.find({ type: 'Text', text: '2 files changed in the working tree' })).toBeDefined()
