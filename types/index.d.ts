@@ -27,6 +27,9 @@ export type Commit = {
  */
 export type FileChange = { status: string; path: string; oldPath?: string; added?: number; deleted?: number; isBinary?: true }
 
+/** A local branch's upstream (`origin/main`) and the commits only one side has; `gone` when deleted there. */
+export type Upstream = { name: string; ahead: number; behind: number; isGone?: boolean }
+
 /** Where the repo's first remote lives on the web, for links to its commits and issues. */
 export type Forge = { base: string; host: string; kind: 'github' | 'gitlab' | 'bitbucket' | 'other' }
 
@@ -37,6 +40,10 @@ export type Graph = {
   changes: FileChange[]
   /** Local branches, then remote ones, for the branch picker */
   branches: string[]
+  /** How many of `branches` are local: the rest are remote */
+  localCount: number
+  /** Each local branch's upstream, and how far it is ahead of and behind it */
+  upstreams: Record<string, Upstream>
   /** The repo's remotes, `origin` first when there is one */
   remotes: string[]
   /** The commit HEAD points at, or '' in a repo with no commit */
@@ -102,6 +109,8 @@ declare module 'claude-code' {
       allBranches: boolean
       /** The repo drawn: a submodule's absolute path; null: the session's own */
       repo: string | null
+      /** Counts the picks of a separator in the branch picker, so the picker draws again */
+      pickerRedraw: number
       /** One branch to draw alone, picked in the header; null: every branch or the current one */
       branchFilter: string | null
       shown: number

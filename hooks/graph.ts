@@ -1,6 +1,6 @@
 // The pure part of Git Graph: reading `git log` and laying commits out in lanes.
 // Nothing here touches Claude Code, so it can be tested with plain Node.
-import type { Cell, Commit, DateFormat, FileChange, Forge, Ref, Signature } from '../types'
+import type { Cell, Commit, DateFormat, FileChange, Forge, Ref, Signature, Upstream } from '../types'
 
 export const SEP = '\x1f'
 export const FORMAT = ['%H', '%P', '%D', '%an', '%ad', '%s'].join('%x1f')
@@ -38,13 +38,18 @@ export function parseNameStatus (stdout: string): FileChange[] {
 
 /** `git for-each-ref --format=%(refname)` → branch names, local first; the remotes' HEAD left out. */
 export function parseBranches (stdout: string): string[] {
+  return splitBranches(stdout).flat()
+}
+
+/** Local branches and remote ones, apart; the remotes' HEAD left out. */
+export function splitBranches (stdout: string): [string[], string[]] {
   const local: string[] = []
   const remote: string[] = []
   for (const ref of stdout.split('\n').map(line => line.trim()).filter(Boolean)) {
     if (ref.startsWith('refs/heads/')) local.push(ref.slice(11))
     else if (ref.startsWith('refs/remotes/') && !ref.endsWith('/HEAD')) remote.push(ref.slice(13))
   }
-  return [...local, ...remote]
+  return [local, remote]
 }
 
 /** `v1.2` or `v1.2: the message`: a tag's name, and a message when it is annotated. */
@@ -82,6 +87,33 @@ export function describeSignature (status: string, signer: string, key: string):
   }
 }
 
+/** What `for-each-ref` reads each local branch's upstream with: name, upstream, `[ahead 1, behind 2]`. */
+export const UPSTREAM_FORMAT = ['%(refname:short)', '%(upstream:short)', '%(upstream:track)'].join('%09')
+
+/** `git for-each-ref --format=UPSTREAM_FORMAT refs/heads` → the upstream of each branch that has one. */
+export function parseUpstreams (stdout: string): Record<string, Upstream> {
+  const upstreams: Record<string, Upstream> = {}
+  for (const line of stdout.split('\n')) {
+    const [branch = '', upstream = '', track = ''] = line.split('\t')
+    if (branch === '' || upstream === '') continue
+    upstreams[branch] = {
+      name: upstream,
+      ahead: Number(track.match(/ahead (\d+)/)?.[1] ?? 0),
+      behind: Number(track.match(/behind (\d+)/)?.[1] ?? 0),
+      ...(track.includes('gone') ? { isGone: true } : {})
+    }
+  }
+  return upstreams
+}
+
+/** `↑1 ↓2 origin/main`: what a branch would push and pull; in step when neither. */
+export function describeUpstream (upstream: Upstream): string {
+  if (upstream.isGone) return `${upstream.name} was deleted on the remote`
+  if (upstream.ahead === 0 && upstream.behind === 0) return `in step with ${upstream.name}`
+  const parts = [upstream.ahead > 0 && `↑${upstream.ahead} to push`, upstream.behind > 0 && `↓${upstream.behind} to pull`].filter(Boolean)
+  return `${parts.join(', ')} · ${upstream.name}`
+}
+
 /** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */
 export const DIFF_LIMIT = 60000
 
@@ -104,11 +136,15 @@ export function parseDiff (stdout: string): { hunks: string; note?: string } {
 /** What `git stash list` is read with: hash, parents, name, author, date, subject. */
 export const STASH_FORMAT = ['%H', '%P', '%gd', '%an', '%ad', '%s'].join('%x1f')
 
-/** `git stash list --format=STASH_FORMAT` → one row per stash, leading to the commit it was made on. */
+/**
+ * `git stash list --format=STASH_FORMAT` → one row per stash, leading to the commit it was made on.
+ * The name comes from the stash's place in the list: with `--date` git writes `%gd` as a date
+ * (`stash@{19 Oct 2026 22:39}`), which two stashes of the same minute share.
+ */
 export function parseStashes (stdout: string): Commit[] {
-  return stdout.split('\n').filter(line => line.includes(SEP)).map(line => {
-    const [hash = '', parents = '', name = '', author = '', date = '', ...subject] = line.split(SEP)
-    return { hash, parents: parents.split(' ').slice(0, 1).filter(Boolean), refs: [], author, date, subject: subject.join(SEP), cells: [], kind: 'stash', stash: name }
+  return stdout.split('\n').filter(line => line.includes(SEP)).map((line, index) => {
+    const [hash = '', parents = '', , author = '', date = '', ...subject] = line.split(SEP)
+    return { hash, parents: parents.split(' ').slice(0, 1).filter(Boolean), refs: [], author, date, subject: subject.join(SEP), cells: [], kind: 'stash', stash: `stash@{${index}}` }
   })
 }
 
