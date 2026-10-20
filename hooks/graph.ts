@@ -68,12 +68,12 @@ export function parseSubmodules (stdout: string): string[] {
   }).filter(Boolean)
 }
 
-/** What a commit's detail asks git for its signature: status, signer, key. */
+/** What a commit's detail asks git for its signature: status, signer, fingerprint. */
 export const SIGNATURE_FORMAT = ['%G?', '%GS', '%GK'].join('%x1f')
 
-/** git's `%G?` letter, with the signer and key → the line the detail shows; none for an unsigned commit. */
-export function describeSignature (status: string, signer: string, key: string): Signature | undefined {
-  const by = [signer && `by ${signer}`, key && `(key ${key})`].filter(Boolean).join(' ')
+/** git's `%G?` letter, with the signer and the signing key's fingerprint → the line the detail shows; none for an unsigned commit. */
+export function describeSignature (status: string, signer: string, fingerprint: string): Signature | undefined {
+  const by = [signer && `by ${signer}`, fingerprint && `(key ${fingerprint})`].filter(Boolean).join(' ')
   const line = (words: string) => [words, by].filter(Boolean).join(' ')
   switch (status) {
     case 'G': return { text: line('✓ good signature'), kind: 'good' }
@@ -345,7 +345,7 @@ export function ancestorsOf (commits: Commit[], head: string): Set<string> {
   return reached
 }
 
-/** A remote's URL (`git@host:owner/repo.git`, `https://host/owner/repo`, `ssh://…`) → its web address. */
+/** A remote's address, in scp form (user@host:owner/repo.git) or as an https, ssh or git URL → its web address. */
 export function forgeOf (url: string): Forge | null {
   const trimmed = url.trim()
   const match = trimmed.match(/^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/) ??
@@ -353,7 +353,7 @@ export function forgeOf (url: string): Forge | null {
   if (!match) return null
   const host = (match[1] ?? '').toLowerCase()
   const kind = host.includes('github') ? 'github' : host.includes('gitlab') ? 'gitlab' : host.includes('bitbucket') ? 'bitbucket' : 'other'
-  return { base: `https://${host}/${match[2]}`, host, kind }
+  return { base: 'https://' + host + '/' + match[2], host, kind }
 }
 
 /** A commit's page on its forge, where the forge is one whose pages are known. */

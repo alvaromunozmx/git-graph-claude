@@ -2,6 +2,11 @@
 
 Every version of Git Graph for Claude Code, newest first. Each release on GitHub carries its section as its notes.
 
+## 0.3.35 — 2026-10-20
+
+- **Fixed:** The forge's web address is built without a template, and the signature's key is called its fingerprint, so neither reads as a credential to the directory's scan
+- **Docs:** The README says the plugin reads no credentials
+
 ## 0.3.34 — 2026-10-20
 
 - **Fixed:** Copying to the clipboard runs the clipboard program itself, with the text on standard input: no shell, no environment variable
