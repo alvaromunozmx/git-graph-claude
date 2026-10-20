@@ -5,12 +5,13 @@
 // - Click a hash to open that commit under its row: its files and a row of actions.
 // - Actions that change the repo (checkout, cherry-pick) ask for a second click to confirm;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
+// - Uncommitted changes get a row of their own above the commit they would follow.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, parseLog } from './graph'
-import type { Commit, Graph, Note, Pending, Ref } from '../types'
+import { FORMAT, layout, parseLog, parseNameStatus, parseStatus, WORKTREE, worktreeRow } from './graph'
+import type { Commit, Detail, FileChange, Graph, Note, Pending, Ref } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -135,26 +136,31 @@ async function load ($: Engine) {
   const allBranches = await read($, ALL)
   let graph: Graph
   try {
-    const [remotes, branch, status, log] = await Promise.all([
+    const [remotes, branch, head, status, log] = await Promise.all([
       git($, ['remote']),
       git($, ['branch', '--show-current']).catch(() => ''),
-      git($, ['status', '--porcelain']).catch(() => ''),
+      git($, ['rev-parse', 'HEAD']).catch(() => ''),
+      git($, ['status', '--porcelain=v1', '-uall']).catch(() => ''),
       git($, [
         'log', ...(allBranches ? ['--all'] : []), '--topo-order', `-n${limit}`,
         `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M'
       ])
     ])
-    const commits = layout(parseLog(log, new Set(remotes.split('\n').map(name => name.trim()).filter(Boolean))))
+    const parsed = parseLog(log, new Set(remotes.split('\n').map(name => name.trim()).filter(Boolean)))
+    const changes = parseStatus(status)
+    // The uncommitted row leads to HEAD, so the layout draws its line down to it
+    const headHash = head.trim()
+    if (changes.length > 0) parsed.unshift(worktreeRow(changes, parsed.some(commit => commit.hash === headHash) ? headHash : null))
     graph = {
-      commits,
+      commits: layout(parsed),
       branch: branch.trim() || '(detached HEAD)',
-      dirty: status.trim().split('\n').filter(Boolean).length,
+      changes,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', dirty: 0, error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -173,10 +179,29 @@ async function select ($: Engine, hash: string) {
   if ((await read($, SELECTED)) === hash) return clearSelection($)
   await $.state.set(SELECTED_REF, hash)
   await $.state.set(PENDING_REF, null)
-  await $.state.set(DETAIL_REF, { hash, text: 'Loading…' })
-  const text = await git($, ['show', '--stat=100', '--format=%an <%ae> · %ad%n%n%B', '--date=format:%d %b %Y %H:%M', hash])
-    .catch(error => `Could not read the commit: ${error instanceof Error ? error.message : String(error)}`)
-  if ((await read($, SELECTED)) === hash) await $.state.set(DETAIL_REF, { hash, text: text.trimEnd() })
+  await $.state.set(DETAIL_REF, { hash, meta: '', message: '', files: [], isLoading: true })
+  const detail = await readDetail($, hash)
+  if ((await read($, SELECTED)) === hash) await $.state.set(DETAIL_REF, detail)
+}
+
+async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>> {
+  const graph = await read($, GRAPH)
+  if (hash === WORKTREE) {
+    const files = graph?.changes ?? []
+    return { hash, meta: `${files.length} ${files.length === 1 ? 'file' : 'files'} changed in the working tree`, message: '', files }
+  }
+  const parent = graph?.commits.find(commit => commit.hash === hash)?.parents[0]
+  try {
+    const [shown, names] = await Promise.all([
+      git($, ['show', '-s', '--format=%an <%ae> · %ad%n%B', '--date=format:%d %b %Y %H:%M', hash]),
+      // A merge is shown against its first parent, as Git Graph does
+      git($, ['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', ...(parent ? [parent, hash] : ['--root', hash])])
+    ])
+    const [meta = '', ...message] = shown.trimEnd().split('\n')
+    return { hash, meta, message: message.join('\n').trim(), files: parseNameStatus(names) }
+  } catch (error) {
+    return { hash, meta: `Could not read the commit: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
+  }
 }
 
 // One function per value: $.state.set only takes a reference named in this file
@@ -257,20 +282,26 @@ async function arm ($: Engine, action: Pending['action'], hash: string) {
   await reload($)
 }
 
-/** Naming a branch needs a conversation: Claude asks, and its own permissions apply. */
-async function newBranch ($: Engine, commit: Commit) {
+/** Writing the message is Claude's job: it proposes one and asks before committing. */
+async function commitChanges ($: Engine) {
+  await ask($, 'Commit the current uncommitted changes. Look at the diff, propose a commit message and ask me before committing.', 'asked Claude to commit the changes')
+}
+
+async function ask ($: Engine, text: string, done: string) {
   if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
-  const short = commit.hash.slice(0, HASH_WIDTH)
   try {
-    const result = await $.prompt.submit({
-      text: `Create a new git branch from commit ${short} ("${commit.subject}"). Ask me for the branch name first, and whether to switch to it.`,
-      asUser: true
-    })
+    const result = await $.prompt.submit({ text, asUser: true })
     if (result?.drop) await note($, 'error', String(result.drop))
-    else await note($, 'info', `asked Claude for a branch from ${short}`)
+    else await note($, 'info', done)
   } catch (error) {
     await note($, 'error', error instanceof Error ? error.message : String(error))
   }
+}
+
+/** Naming a branch needs a conversation: Claude asks, and its own permissions apply. */
+async function newBranch ($: Engine, commit: Commit) {
+  const short = commit.hash.slice(0, HASH_WIDTH)
+  await ask($, `Create a new git branch from commit ${short} ("${commit.subject}"). Ask me for the branch name first, and whether to switch to it.`, `asked Claude for a branch from ${short}`)
 }
 
 // ── Drawing ────────────────────────────────────────────────────────────────────
@@ -290,14 +321,15 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const lastNote = await read($, NOTE)
   const shown = await read($, SHOWN)
   const columns = Math.max(40, e.props.bodyColumns)
+  const count = graph?.commits.filter(commit => !commit.kind).length ?? 0
 
   const header = (
     <Box key="header" flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
         <Text wrap="truncate-end">
           <Text color="green">{graph?.branch ? `⎇ ${graph.branch}` : 'Git Graph'}</Text>
-          {graph && graph.dirty > 0 && <Text color="yellow">{`  ● ${graph.dirty} uncommitted`}</Text>}
-          <Text dimColor>{graph && !graph.error ? `  ·  ${graph.commits.length} commits${graph.commits.length >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
+          {graph && graph.changes.length > 0 && <Text color="yellow">{`  ● ${graph.changes.length} uncommitted`}</Text>}
+          <Text dimColor>{graph && !graph.error ? `  ·  ${count} commits${count >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
         </Text>
         <Box flexDirection="row" columnGap={2}>
           <Button key="compact" label={compact ? 'compact' : 'spaced'} plain dimColor onPress={() => toggleCompact($)} />
@@ -315,7 +347,11 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 
   const visible = graph.commits.slice(0, shown)
   // Compact drops the gap after every lane: half as wide, the junction glyphs still connect
-  const cellsOf = (commit: Commit) => (compact ? commit.cells.filter((_, i) => i % 2 === 0) : commit.cells)
+  const cellsOf = (commit: Commit) => {
+    const cells = compact ? commit.cells.filter((_, i) => i % 2 === 0) : commit.cells
+    // The uncommitted row is hollow: nothing is committed there yet
+    return commit.kind === 'worktree' ? cells.map(cell => (cell.ch === '●' ? { ...cell, ch: '○' } : cell)) : cells
+  }
   const graphWidth = Math.max(...visible.map(commit => cellsOf(commit).length)) + 1
   const metaWidth = AUTHOR_WIDTH + DATE_WIDTH + 2
   const showMeta = columns >= graphWidth + metaWidth + HASH_WIDTH + 30
@@ -325,7 +361,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   for (const commit of visible) {
     const isSelected = commit.hash === selected
     rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected }))
-    if (isSelected) rows.push(drawDetail(Box, Button, Text, $, commit, detail?.hash === commit.hash ? detail.text : 'Loading…', pending, graph, graphWidth))
+    if (isSelected) rows.push(drawDetail(Box, Button, Text, $, commit, detail?.hash === commit.hash ? detail : null, pending, graph, graphWidth))
   }
 
   return (
@@ -385,7 +421,7 @@ function drawRow (
           {refs.map(({ ref, text }, i) => (
             <Text key={`ref-${i}`} color={REF_COLOR[ref.kind]} bold={ref.kind === 'head'}>{text}</Text>
           ))}
-          <Text dimColor={isMerge && !isSelected} bold={isSelected}>{cut(commit.subject, room)}</Text>
+          <Text dimColor={(isMerge || commit.kind === 'worktree') && !isSelected} italic={commit.kind === 'worktree'} bold={isSelected}>{cut(commit.subject, room)}</Text>
         </Text>
       </Box>
       {showMeta && (
@@ -399,7 +435,7 @@ function drawRow (
         </Box>
       )}
       <Box width={HASH_WIDTH + 2} flexShrink={0} justifyContent="flex-end">
-        <Button key={`hash-${commit.hash}`} label={commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
+        <Button key={`hash-${commit.hash}`} label={commit.kind === 'worktree' ? '*' : commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
       </Box>
     </Box>
   )
@@ -407,33 +443,63 @@ function drawRow (
 
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
-  Box: any, Button: any, Text: any, $: Engine, commit: Commit, text: string,
+  Box: any, Button: any, Text: any, $: Engine, commit: Commit, detail: Detail,
   pending: Pending | null, graph: Graph, graphWidth: number
 ) {
   const armed = (action: Pending['action']) => pending?.action === action && pending.hash === commit.hash
   const target = checkoutTarget(commit)
   const isHead = commit.refs.some(ref => ref.kind === 'head')
-  const lines = text.split('\n')
+  const isWorktree = commit.kind === 'worktree'
 
   return (
     <Box key={`detail-${commit.hash}`} flexDirection="column" marginLeft={graphWidth} marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text color="yellow" wrap="truncate-end">{commit.hash}</Text>
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="copy" label="⧉ copy hash" plain onPress={() => copyHash($, commit.hash)} />
-        {!isHead && (
-          <Button key="checkout" label={armed('checkout') ? `confirm: checkout ${target.label}?` : '⎇ checkout'} plain dimColor={!armed('checkout')} onPress={() => arm($, 'checkout', commit.hash)} />
-        )}
-        <Button key="branch" label="+ new branch here" plain dimColor onPress={() => newBranch($, commit)} />
-        {!isHead && commit.parents.length === 1 && (
-          <Button key="pick" label={armed('cherry-pick') ? `confirm: cherry-pick onto ${graph.branch}?` : '⇣ cherry-pick'} plain dimColor={!armed('cherry-pick')} onPress={() => arm($, 'cherry-pick', commit.hash)} />
-        )}
-      </Box>
+      <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.hash}</Text>
+      {isWorktree
+        ? (
+          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+            <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
+          </Box>
+          )
+        : (
+          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+            <Button key="copy" label="⧉ copy hash" plain onPress={() => copyHash($, commit.hash)} />
+            {!isHead && (
+              <Button key="checkout" label={armed('checkout') ? `confirm: checkout ${target.label}?` : '⎇ checkout'} plain dimColor={!armed('checkout')} onPress={() => arm($, 'checkout', commit.hash)} />
+            )}
+            <Button key="branch" label="+ new branch here" plain dimColor onPress={() => newBranch($, commit)} />
+            {!isHead && commit.parents.length === 1 && (
+              <Button key="pick" label={armed('cherry-pick') ? `confirm: cherry-pick onto ${graph.branch}?` : '⇣ cherry-pick'} plain dimColor={!armed('cherry-pick')} onPress={() => arm($, 'cherry-pick', commit.hash)} />
+            )}
+          </Box>
+          )}
       <Text> </Text>
-      {lines.map((line, i) => (
-        <Text key={`line-${i}`} wrap="truncate-end" dimColor={i === 0}>
-          {line || ' '}
-        </Text>
-      ))}
+      {!detail || detail.isLoading
+        ? <Text dimColor>Loading…</Text>
+        : drawDetailBody(Box, Text, detail)}
     </Box>
+  )
+}
+
+function drawDetailBody (Box: any, Text: any, detail: NonNullable<Detail>) {
+  return (
+    <Box flexDirection="column">
+      <Text dimColor wrap="truncate-end">{detail.meta}</Text>
+      {detail.message !== '' && <Text> </Text>}
+      {detail.message !== '' && detail.message.split('\n').map((line, i) => <Text key={`line-${i}`} wrap="truncate-end">{line || ' '}</Text>)}
+      {detail.files.length > 0 && <Text> </Text>}
+      {detail.files.map(file => drawFile(Text, file))}
+    </Box>
+  )
+}
+
+const STATUS_COLOR: Record<string, string> = { A: 'green', M: 'yellow', D: 'red', R: 'cyan', C: 'cyan', T: 'yellow', '?': 'green', U: 'red' }
+
+function drawFile (Text: any, file: FileChange) {
+  return (
+    <Text key={`file-${file.path}`} wrap="truncate-end">
+      <Text color={STATUS_COLOR[file.status] ?? 'white'}>{`${file.status === '?' ? 'U' : file.status} `}</Text>
+      {file.oldPath ? <Text dimColor>{`${file.oldPath} → `}</Text> : ''}
+      {file.path}
+    </Text>
   )
 }

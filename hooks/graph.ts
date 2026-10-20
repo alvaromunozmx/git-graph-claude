@@ -1,9 +1,47 @@
 // The pure part of Git Graph: reading `git log` and laying commits out in lanes.
 // Nothing here touches Claude Code, so it can be tested with plain Node.
-import type { Cell, Commit, Ref } from '../types'
+import type { Cell, Commit, FileChange, Ref } from '../types'
 
 export const SEP = '\x1f'
 export const FORMAT = ['%H', '%P', '%D', '%an', '%ad', '%s'].join('%x1f')
+/** The hash of the row that stands for the working tree's uncommitted changes. */
+export const WORKTREE = 'worktree'
+
+/** `git status --porcelain=v1 -uall` → one change per file, the staged status first. */
+export function parseStatus (stdout: string): FileChange[] {
+  return stdout.split('\n').filter(line => line.length > 3).map(line => {
+    const [x = ' ', y = ' '] = line
+    const rest = line.slice(3)
+    const status = x === '?' ? '?' : x !== ' ' ? x : y
+    const arrow = rest.indexOf(' -> ')
+    return (status === 'R' || status === 'C') && arrow !== -1
+      ? { status, path: rest.slice(arrow + 4), oldPath: rest.slice(0, arrow) }
+      : { status, path: rest }
+  })
+}
+
+/** `git diff-tree --name-status` → one change per file; `R100 old new` keeps both paths. */
+export function parseNameStatus (stdout: string): FileChange[] {
+  return stdout.split('\n').filter(Boolean).map(line => {
+    const [code = '', first = '', second] = line.split('\t')
+    const status = code.charAt(0)
+    return second !== undefined ? { status, path: second, oldPath: first } : { status, path: first }
+  })
+}
+
+/** The row that stands for uncommitted changes, drawn above the commit it would follow. */
+export function worktreeRow (changes: FileChange[], head: string | null): Commit {
+  return {
+    hash: WORKTREE,
+    parents: head ? [head] : [],
+    refs: [],
+    author: '',
+    date: '',
+    subject: `Uncommitted Changes (${changes.length})`,
+    cells: [],
+    kind: 'worktree'
+  }
+}
 
 /** `HEAD -> main, origin/main, tag: v1.0` → refs, the checked-out branch first. */
 export function parseRefs (decoration: string, remotes: Set<string>): Ref[] {

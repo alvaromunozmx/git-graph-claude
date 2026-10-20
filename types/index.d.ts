@@ -11,18 +11,24 @@ export type Commit = {
   date: string
   subject: string
   cells: Cell[]
+  /** A row that is no commit: the working tree's uncommitted changes */
+  kind?: 'worktree'
 }
+
+/** A file a commit (or the working tree) changed: A, M, D, R, C, T or ? (untracked). */
+export type FileChange = { status: string; path: string; oldPath?: string }
 
 export type Graph = {
   commits: Commit[]
   branch: string
   /** Files with uncommitted changes */
-  dirty: number
+  changes: FileChange[]
   error: string | null
   loadedAt: number
 }
 
-export type Detail = { hash: string; text: string } | null
+/** The open commit: who and when, its message, and the files it changed. */
+export type Detail = { hash: string; meta: string; message: string; files: FileChange[]; isLoading?: boolean } | null
 
 /** An action waiting for its confirming click. */
 export type Pending = { action: 'checkout' | 'cherry-pick'; hash: string }
