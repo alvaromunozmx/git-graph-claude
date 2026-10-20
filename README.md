@@ -75,6 +75,26 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
+### In motion
+
+Opening a commit: its quick links (copy the hash or the subject, its page on GitHub), its actions, its message and files, and **+ Branch…**, which hands the task to Claude.
+
+<img alt="Opening a commit in the Git Graph pane: quick links, actions, message and files" src=".github/gif-commit.gif" />
+
+The branch picker, with local branches apart from remote ones, and a branch opened from its badge: how it stands against its upstream and what it can do.
+
+<img alt="The branch picker in the Git Graph pane, then a branch opened from its badge" src=".github/gif-branches.gif" />
+
+The header's buttons, which say what they do under the pointer, and the settings: lanes, columns, date format and what is dimmed.
+
+<img alt="The Git Graph pane's header buttons and settings panel" src=".github/gif-settings.gif" />
+
+A branch's panel and a commit's open together, the lanes going on beside them.
+
+<img alt="A branch panel and a commit panel open in the Git Graph pane, with the lanes beside them" src=".github/gif-panels.gif" />
+
+### Screenshots
+
 Uncommitted changes, opened from their `*******`: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**, here with a new file's diff open.
 
 <img alt="The uncommitted changes opened in the Git Graph pane: the files changed, one with its diff open, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
