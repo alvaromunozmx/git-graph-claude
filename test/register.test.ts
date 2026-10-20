@@ -10,6 +10,7 @@ const CWD = '/repo'
 const SURFACES = ['terminal', 'desktop'] as const
 
 const LOG = [
+  ['c3', 'a1', 'feature, origin/feature', 'Ana', '19 Oct 2026 11:00', 'feature work'],
   ['b2', 'a1', 'HEAD -> main, origin/main', 'Alvaro', '19 Oct 2026 10:00', 'second commit'],
   ['a1', '', 'tag: v1.0', 'Alvaro', '18 Oct 2026 09:00', 'first commit']
 ].map(row => row.join(SEP)).join('\n')
@@ -198,7 +199,7 @@ test('the find field keeps the commits that match, lit', async ($, on) => {
     await ui.input({ key: 'find', text: 'v1.0' })
     expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
     await ui.input({ key: 'find', text: 'nothing like it' })
-    expect(await ui.find({ type: 'Text', text: /No commit in the last 2 matches/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /No commit in the last 3 matches/ })).toBeDefined()
     await ui.press({ key: 'find-clear' })
     expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
     expect(await ui.find({ key: 'hash-b2' })).toBeDefined()
@@ -300,4 +301,76 @@ test('a tag is named in a field: lightweight, or annotated after a colon', async
     expect(seen.git.findLast(args => args[0] === 'tag')).toEqual(['tag', '-a', 'v2.1', '-m', 'the release', 'b2'])
     await ui.press({ key: 'hash-b2' })
   }
+})
+
+test('a branch badge opens its actions under the row', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'ref-local-feature' })
+    expect(await ui.find({ type: 'Text', text: 'branch feature' })).toBeDefined()
+    expect(await ui.find({ key: 'rebase-ref' })).toBeDefined()
+    await ui.press({ key: 'merge-ref' })
+    await ui.press({ key: 'merge-ref' })
+    expect(seen.git.findLast(args => args[0] === 'merge')).toEqual(['merge', '--no-edit', 'feature'])
+    await ui.press({ key: 'push-ref' })
+    await ui.press({ key: 'push-ref' })
+    expect(seen.git.findLast(args => args[0] === 'push')).toEqual(['push', '-u', 'origin', 'feature'])
+    await ui.press({ key: 'rename' })
+    await ui.input({ key: 'rename-branch', text: 'feature-2' })
+    expect(seen.git.findLast(args => args[0] === 'branch' && args[1] !== '--show-current')).toEqual(['branch', '-m', 'feature', 'feature-2'])
+  }
+})
+
+test('the current branch pulls, and offers no checkout', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'ref-head-main' })
+  expect(await ui.find({ type: 'Text', text: 'current branch main' })).toBeDefined()
+  expect(await ui.find({ key: 'checkout-ref' })).toBeUndefined()
+  await ui.press({ key: 'pull' })
+  expect(seen.git.findLast(args => args[0] === 'pull')).toEqual(['pull', '--ff-only'])
+})
+
+test('an unmerged branch asks again before it is forced', async ($, on) => {
+  const seen = world(on, { branch: args => (args[0] === '-d' ? { exitCode: 1, stderr: "error: the branch 'feature' is not fully merged." } : 'main\n') })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'terminal')
+  await ui.press({ key: 'ref-local-feature' })
+  await ui.press({ key: 'delete-branch' })
+  await ui.press({ key: 'delete-branch' })
+  expect(seen.git.findLast(args => args[0] === 'branch' && args[1] !== '--show-current')).toEqual(['branch', '-d', 'feature'])
+  expect((await ui.find({ key: 'force-delete-branch' }))?.props.label).toBe('confirm: delete feature and its unmerged commits?')
+  await ui.press({ key: 'force-delete-branch' })
+  expect(seen.git.findLast(args => args[0] === 'branch' && args[1] !== '--show-current')).toEqual(['branch', '-D', 'feature'])
+})
+
+test('a remote branch checks out tracking, fetches and deletes on its remote', async ($, on) => {
+  const seen = world(on, { 'for-each-ref': 'refs/heads/main\nrefs/remotes/origin/main\nrefs/remotes/origin/feature\n' })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'ref-remote-origin/feature' })
+  await ui.press({ key: 'checkout-ref' })
+  await ui.press({ key: 'checkout-ref' })
+  expect(seen.git.findLast(args => args[0] === 'switch')).toEqual(['switch', '--track', 'origin/feature'])
+  await ui.press({ key: 'fetch-ref' })
+  expect(seen.git.findLast(args => args[0] === 'fetch')).toEqual(['fetch', 'origin', 'feature'])
+  await ui.press({ key: 'delete-remote-branch' })
+  await ui.press({ key: 'delete-remote-branch' })
+  expect(seen.git.findLast(args => args[0] === 'push')).toEqual(['push', 'origin', '--delete', 'feature'])
+})
+
+test('a tag pushes and deletes', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'ref-tag-v1.0' })
+  await ui.press({ key: 'push-ref' })
+  await ui.press({ key: 'push-ref' })
+  expect(seen.git.findLast(args => args[0] === 'push')).toEqual(['push', 'origin', 'refs/tags/v1.0'])
+  await ui.press({ key: 'delete-tag' })
+  await ui.press({ key: 'delete-tag' })
+  expect(seen.git.findLast(args => args[0] === 'tag')).toEqual(['tag', '-d', 'v1.0'])
 })

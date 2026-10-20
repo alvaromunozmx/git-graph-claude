@@ -25,6 +25,8 @@ export type Graph = {
   changes: FileChange[]
   /** Local branches, then remote ones, for the branch picker */
   branches: string[]
+  /** The repo's remotes, `origin` first when there is one */
+  remotes: string[]
   error: string | null
   loadedAt: number
 }
@@ -41,8 +43,11 @@ export type CommitAction = 'checkout' | 'cherry-pick' | 'revert' | 'merge' | 're
 /** How far `reset` goes: the branch only, also the index, or also the working tree. */
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
-/** An action waiting for its confirming click. */
-export type Pending = { action: CommitAction; hash: string }
+/** An action on a branch or tag badge that changes the repo or a remote: it waits for a confirming click. */
+export type RefAction = 'checkout-ref' | 'merge-ref' | 'rebase-ref' | 'delete-branch' | 'force-delete-branch' | 'delete-remote-branch' | 'delete-tag' | 'push-ref'
+
+/** An action waiting for its confirming click: on a commit (its hash) or on a ref (its name). */
+export type Pending = { action: CommitAction | RefAction; hash: string }
 
 export type Note = { kind: 'ok' | 'error' | 'info'; text: string }
 
@@ -60,6 +65,10 @@ declare module 'claude-code' {
       compact: boolean
       pending: Pending | null
       note: Note | null
+      /** The branch or tag badge whose actions are open */
+      ref: Ref | null
+      /** The branch whose rename field is open */
+      renaming: string | null
       /** The commit whose tag field is open */
       tagging: string | null
       /** What the find field holds: rows that match it are the only ones drawn */

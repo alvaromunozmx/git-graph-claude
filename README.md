@@ -22,6 +22,10 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **spaced / compact** switches between lanes with a gap and lanes side by side.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
+- **Click a branch or tag badge** to open its actions under the row:
+  - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; the current branch also **pull**s (fast-forward only).
+  - a remote branch: **checkout** (a local branch tracking it), **merge into current**, **rebase current onto this**, **fetch**, **delete on remote**.
+  - a tag: **checkout** (detached), **merge into current**, **push tag**, **delete tag**.
 - **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
   - **copy hash** and **copy subject** to the clipboard.
   - **checkout**: its local branch; or a new local branch tracking its remote one; or a detached HEAD.
