@@ -1,6 +1,7 @@
 // The mod as the engine loads it: /git-graph is registered, opens the pane, and the pane
 // draws the history git reports. Run by `claude plugin test .` (`npm run test:mod`).
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { SEP } from '../hooks/graph'
@@ -13,13 +14,28 @@ const LOG = [
   ['a1', '', 'tag: v1.0', 'Alvaro', '18 Oct 2026 09:00', 'first commit']
 ].map(row => row.join(SEP)).join('\n')
 
+/** What the fake repo answers, by git subcommand: stdout, or a failure. */
+type Answer = string | { exitCode: number; stdout?: string; stderr?: string }
+type Repo = Record<string, Answer | ((args: string[]) => Answer)>
+
+const REPO: Repo = {
+  remote: 'origin\n',
+  branch: 'main\n',
+  'rev-parse': 'b2\n',
+  status: '',
+  log: `${LOG}\n`,
+  show: 'Alvaro <a@b.c> · 19 Oct 2026 10:00\nsecond commit\n\nThe body.\n',
+  'diff-tree': 'M\thooks/register.tsx\nA\tREADME.md\n'
+}
+
 /** /git-graph as the person types it at the prompt. */
 const typed = (args: string) =>
   ({ command: 'git-graph', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } }) as const
 
 /** The engine beneath the mod: a repo on `main`, and a record of what the mod asked for. */
-function world (on: On) {
-  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][] }
+function world (on: On, repo: Repo = {}) {
+  const answers: Repo = { ...REPO, ...repo }
+  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][], prompts: [] as string[] }
   mock.clock(on, { now: 0 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
@@ -31,17 +47,27 @@ function world (on: On) {
     seen.opened.push(e.id)
     return { value: { isPlaced: true } }
   })
+  on('prompt.submit', ($, e) => {
+    seen.prompts.push(e.text)
+    return { text: e.text }
+  })
   on('process.run', ($, e) => {
     const [, , cwd, command = '', ...args] = e.argv
     expect(cwd).toBe(CWD)
     seen.git.push([command, ...args])
-    const stdout = command === 'remote' ? 'origin\n'
-      : command === 'branch' ? 'main\n'
-        : command === 'log' ? `${LOG}\n`
-          : ''
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const found = answers[command] ?? ''
+    const answer = typeof found === 'function' ? found(args) : found
+    const result = typeof answer === 'string' ? { exitCode: 0, stdout: answer, stderr: '' } : { stdout: '', stderr: '', ...answer }
+    return { value: { ...result, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return seen
+}
+
+const PANE_PROPS = { title: 'Git Graph', isFocused: true, bodyColumns: 120, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } as const
+
+/** The pane as a surface draws it. */
+function mount ($: Engine, surface: (typeof SURFACES)[number]) {
+  return $.ui.mount({ plugin: 'git-graph', surface, component: 'Pane', requestId: 'git-graph', props: PANE_PROPS })
 }
 
 test('/git-graph is registered when the session starts', async ($, on) => {
@@ -75,13 +101,7 @@ test('the pane draws each commit with its refs', async ($, on) => {
   world(on)
   await $.command.run(typed(''))
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount({
-      plugin: 'git-graph',
-      surface,
-      component: 'Pane',
-      requestId: 'git-graph',
-      props: { title: 'Git Graph', isFocused: true, bodyColumns: 120, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }
-    })
+    const ui = await mount($, surface)
     expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'first commit' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '[main]' })).toBeDefined()
@@ -89,4 +109,44 @@ test('the pane draws each commit with its refs', async ($, on) => {
     expect(await ui.find({ key: 'hash-b2' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'not a commit' })).toBeUndefined()
   }
+})
+
+test('a commit opens with its message and the files it changed', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'hash-b2' })
+    expect(await ui.find({ type: 'Text', text: 'The body.' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'hooks/register.tsx' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'README.md' })).toBeDefined()
+    // b2's files are read against its first parent
+    expect(seen.git.find(args => args[0] === 'diff-tree')).toEqual(['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', 'a1', 'b2'])
+    await ui.press({ key: 'hash-b2' })
+    expect(await ui.find({ type: 'Text', text: 'The body.' })).toBeUndefined()
+  }
+})
+
+test('uncommitted changes get a row above HEAD that lists them', async ($, on) => {
+  const seen = world(on, { status: ' M hooks/graph.ts\n?? notes.md\n' })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: 'Uncommitted Changes (2)' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '● 2 uncommitted' })).toBeDefined()
+    await ui.press({ key: 'hash-worktree' })
+    expect(await ui.find({ type: 'Text', text: '2 files changed in the working tree' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'hooks/graph.ts' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'notes.md' })).toBeDefined()
+    await ui.press({ key: 'commit' })
+    expect(seen.prompts.at(-1)).toContain('Commit the current uncommitted changes')
+    await ui.press({ key: 'hash-worktree' })
+  }
+})
+
+test('a clean tree has no uncommitted row', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ key: 'hash-worktree' })).toBeUndefined()
 })
