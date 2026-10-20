@@ -1061,11 +1061,12 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
             <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} hover={{ scope: 'tip-settings' }} onPress={() => toggleSettings($)} />)}
         </Box>
       </Box>
-      {/* Finding on the left, walking the rows on the right. The walk's buttons are drawn here,
-          always, because a Button's hotkey only answers while the Button is drawn */}
+      {/* Finding on the left, walking the rows on the right, on one line: the field gives way to
+          the walk, which a terminal's full-width field pushed onto a line of its own. The walk's
+          buttons are drawn here, always, because a Button's hotkey only answers while it is drawn */}
       {isDrawn && (
-        <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap={2} marginTop={1}>
-          <Box flexDirection="row" columnGap={1} alignItems="center" flexGrow={1} flexShrink={1}>
+        <Box flexDirection="row" justifyContent="space-between" columnGap={2} marginTop={1}>
+          <Box flexDirection="row" columnGap={1} alignItems="center" flexGrow={1} flexShrink={1} minWidth={16} overflow="hidden">
             {Input && withTip(ui, 'focus-find', 'Find by message, author, hash or branch · S', 'left',
               <Button key="focus-find" label="⌕" hotkey="s" plain dimColor hover={{ scope: 'tip-focus-find' }} onPress={() => focusFind($)} />)}
             {Input && (
