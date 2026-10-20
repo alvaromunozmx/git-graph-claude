@@ -343,6 +343,30 @@ export function curvesOf (cells: Cell[]): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">${parts.join('')}${nodes.join('')}</svg>`
 }
 
+/** `Alvaro Muñoz` → `AM`; one name gives its first two letters. */
+export function initialsOf (name: string): string {
+  // Words that start with a letter or digit: `Ana <a@b.c>` is Ana's
+  const words = name.trim().split(/[\s._-]+/).filter(word => /^[\p{L}\p{N}]/u.test(word))
+  if (words.length === 0) return '?'
+  const letters = words.length === 1 ? Array.from(words[0] ?? '').slice(0, 2) : [Array.from(words[0] ?? '')[0], Array.from(words.at(-1) ?? '')[0]]
+  return letters.join('').toUpperCase()
+}
+
+/** The same author always gets the same color, out of `count`. */
+export function colorIndexOf (name: string, count: number): number {
+  let hash = 0
+  for (const ch of name) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) >>> 0
+  return hash % count
+}
+
+/** An author's avatar for the surfaces that draw SVG: initials on a circle of their color. */
+export function avatarOf (name: string, size = 16): string {
+  const color = CURVE_COLORS[colorIndexOf(name, CURVE_COLORS.length)]
+  const text = initialsOf(name).replace(/[<>&"]/g, '')
+  const r = size / 2
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/><text x="${r}" y="${r}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="${size * 0.45}" font-weight="600" fill="#fff">${text}</text></svg>`
+}
+
 /** The cells as plain text, for tests and for the transcript fallback. */
 export function draw (commit: Commit): string {
   return commit.cells.map(cell => cell.ch).join('')

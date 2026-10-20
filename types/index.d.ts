@@ -88,6 +88,8 @@ declare module 'claude-code' {
       settingsOpen: boolean
       /** Desktop draws the lanes as curves (SVG) instead of box-drawing glyphs */
       curves: boolean
+      /** Each author has an avatar: their initials on their own color */
+      avatars: boolean
       /** Merge commits are drawn dim */
       muteMerges: boolean
       /** Commits HEAD does not reach are drawn dim */
