@@ -104,4 +104,6 @@ It is a Claude Code *mod*: [`hooks/register.tsx`](hooks/register.tsx) registers 
 
 To release: `npm version patch` (or `minor`, `major`) bumps `package.json`, `plugin.json` and `marketplace.json` together and tags the commit; `git push --follow-tags` publishes a GitHub release with the zip. Users update with `/plugin marketplace update git-graph-claude`.
 
-MIT © Alvaro Muñoz
+## License
+
+[MIT](LICENSE) © Alvaro Muñoz
