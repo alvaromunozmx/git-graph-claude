@@ -25,6 +25,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
+import { checkoutCommit, checkoutRemote, git as cmd, splitRemote } from './commands'
 import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
@@ -573,18 +574,6 @@ async function note ($: Engine, kind: Note['kind'], text: string) {
 
 // ── Actions ────────────────────────────────────────────────────────────────────
 
-/** Where a checkout of this commit lands: its local branch, a branch tracking its remote one, or a detached HEAD. */
-function checkoutTarget (commit: Commit): { label: string; args: string[] } {
-  const local = commit.refs.find(ref => ref.kind === 'local' || (ref.kind === 'head' && ref.name !== 'HEAD'))
-  if (local) return { label: local.name, args: ['switch', local.name] }
-  const remote = commit.refs.find(ref => ref.kind === 'remote')
-  if (remote) {
-    const name = remote.name.slice(remote.name.indexOf('/') + 1)
-    return { label: `${name} (tracking ${remote.name})`, args: ['switch', '--track', remote.name] }
-  }
-  return { label: `${commit.hash.slice(0, HASH_WIDTH)} (detached)`, args: ['switch', '--detach', commit.hash] }
-}
-
 async function copyText ($: Engine, text: string, what: string) {
   const platform = (await $.process.run(['uname', '-s']).catch(() => undefined))?.stdout.trim()
   const argv = platform === 'Darwin'
@@ -598,10 +587,11 @@ async function copyText ($: Engine, text: string, what: string) {
 }
 
 /** The words an action's confirming button asks with. */
-function confirmText (action: CommitAction, commit: Commit, branch: string): string {
+function confirmText (action: CommitAction, commit: Commit, graph: Graph): string {
   const short = commit.hash.slice(0, HASH_WIDTH)
+  const branch = graph.branch
   switch (action) {
-    case 'checkout': return `confirm: checkout ${checkoutTarget(commit).label}?`
+    case 'checkout': return `confirm: checkout ${checkoutCommit(commit, graph.remotes, graph.branches).label}?`
     case 'cherry-pick': return `confirm: cherry-pick onto ${branch}?`
     case 'revert': return `confirm: revert ${short} on ${branch}?`
     case 'merge': return `confirm: merge ${mergeTarget(commit)} into ${branch}?`
@@ -645,30 +635,30 @@ async function run ($: Engine, action: CommitAction, hash: string, mode: ResetMo
   try {
     switch (action) {
       case 'checkout': {
-        const target = checkoutTarget(commit)
+        const target = checkoutCommit(commit, graph.remotes, graph.branches)
         await git($, target.args)
         await note($, 'ok', `checked out ${target.label}`)
         break
       }
       case 'cherry-pick':
-        await undoOnConflict($, ['cherry-pick', hash], ['cherry-pick', '--abort'])
+        await undoOnConflict($, cmd.cherryPick(hash), cmd.abort('cherry-pick'))
         await note($, 'ok', `cherry-picked ${short} onto ${graph.branch}`)
         break
       case 'revert':
         // A merge is reverted against its first parent, the side it was merged into
-        await undoOnConflict($, ['revert', '--no-edit', ...(commit.parents.length > 1 ? ['-m', '1'] : []), hash], ['revert', '--abort'])
+        await undoOnConflict($, cmd.revert(hash, commit.parents.length > 1), cmd.abort('revert'))
         await note($, 'ok', `reverted ${short} on ${graph.branch}`)
         break
       case 'merge':
-        await undoOnConflict($, ['merge', '--no-edit', mergeTarget(commit)], ['merge', '--abort'])
+        await undoOnConflict($, cmd.merge(mergeTarget(commit)), cmd.abort('merge'))
         await note($, 'ok', `merged ${mergeTarget(commit)} into ${graph.branch}`)
         break
       case 'rebase':
-        await undoOnConflict($, ['rebase', hash], ['rebase', '--abort'])
+        await undoOnConflict($, cmd.rebase(hash), cmd.abort('rebase'))
         await note($, 'ok', `rebased ${graph.branch} onto ${short}`)
         break
       case 'reset':
-        await git($, ['reset', `--${mode}`, hash])
+        await git($, cmd.reset(mode, hash))
         await note($, 'ok', `reset ${graph.branch} to ${short} (${mode})`)
         break
     }
@@ -699,7 +689,7 @@ async function tag ($: Engine, hash: string, value: string) {
   if (name === '') return
   try {
     await git($, ['check-ref-format', `refs/tags/${name}`]).catch(() => { throw new Error(`“${name}” is not a valid tag name`) })
-    await git($, ['tag', ...(message ? ['-a', name, '-m', message] : [name]), hash])
+    await git($, cmd.tag(name, hash, message))
     await $.state.set(TAGGING_REF, null)
     await note($, 'ok', `tagged ${hash.slice(0, HASH_WIDTH)} as ${name}`)
     await reload($)
@@ -721,12 +711,6 @@ async function selectRef ($: Engine, ref: Ref | null) {
 }
 
 const COMMIT_ACTIONS: Record<CommitAction, true> = { checkout: true, 'cherry-pick': true, revert: true, merge: true, rebase: true, reset: true }
-
-/** A remote branch `origin/feature/x` → its remote and its branch there. */
-function splitRemote (name: string, remotes: string[]) {
-  const remote = remotes.find(item => name.startsWith(`${item}/`)) ?? name.slice(0, name.indexOf('/'))
-  return { remote, branch: name.slice(remote.length + 1) }
-}
 
 function refConfirmText (action: RefAction, ref: Ref, graph: Graph): string {
   const remote = graph.remotes[0] ?? 'origin'
@@ -767,27 +751,26 @@ async function runRef ($: Engine, action: RefAction, ref: Ref) {
     switch (action) {
       case 'checkout-ref':
         if (ref.kind === 'remote') {
-          const { branch } = splitRemote(ref.name, graph.remotes)
           // A local branch of that name already exists: switch to it rather than fail
-          await git($, graph.branches.includes(branch) ? ['switch', branch] : ['switch', '--track', ref.name])
+          await git($, checkoutRemote(ref.name, graph.remotes, graph.branches))
         } else if (ref.kind === 'tag') {
-          await git($, ['switch', '--detach', ref.name])
+          await git($, cmd.detach(ref.name))
         } else {
-          await git($, ['switch', ref.name])
+          await git($, cmd.switchTo(ref.name))
         }
         await note($, 'ok', `checked out ${ref.name}`)
         break
       case 'merge-ref':
-        await undoOnConflict($, ['merge', '--no-edit', ref.name], ['merge', '--abort'])
+        await undoOnConflict($, cmd.merge(ref.name), cmd.abort('merge'))
         await note($, 'ok', `merged ${ref.name} into ${graph.branch}`)
         break
       case 'rebase-ref':
-        await undoOnConflict($, ['rebase', ref.name], ['rebase', '--abort'])
+        await undoOnConflict($, cmd.rebase(ref.name), cmd.abort('rebase'))
         await note($, 'ok', `rebased ${graph.branch} onto ${ref.name}`)
         break
       case 'delete-branch':
         try {
-          await git($, ['branch', '-d', ref.name])
+          await git($, cmd.deleteBranch(ref.name, false))
         } catch (error) {
           // Not merged: offer to force it, which loses the commits only that branch has
           if (/not fully merged/i.test(error instanceof Error ? error.message : '')) {
@@ -799,21 +782,21 @@ async function runRef ($: Engine, action: RefAction, ref: Ref) {
         await note($, 'ok', `deleted branch ${ref.name}`)
         break
       case 'force-delete-branch':
-        await git($, ['branch', '-D', ref.name])
+        await git($, cmd.deleteBranch(ref.name, true))
         await note($, 'ok', `deleted branch ${ref.name}`)
         break
       case 'delete-remote-branch': {
         const target = splitRemote(ref.name, graph.remotes)
-        await git($, ['push', target.remote, '--delete', target.branch], [0], 120000)
+        await git($, cmd.deleteRemoteBranch(target.remote, target.branch), [0], 120000)
         await note($, 'ok', `deleted ${target.branch} on ${target.remote}`)
         break
       }
       case 'delete-tag':
-        await git($, ['tag', '-d', ref.name])
+        await git($, cmd.deleteTag(ref.name))
         await note($, 'ok', `deleted tag ${ref.name}`)
         break
       case 'push-ref':
-        await git($, ref.kind === 'tag' ? ['push', remote, `refs/tags/${ref.name}`] : ['push', '-u', remote, ref.name], [0], 120000)
+        await git($, ref.kind === 'tag' ? cmd.pushTag(remote, ref.name) : cmd.pushBranch(remote, ref.name), [0], 120000)
         await note($, 'ok', `pushed ${ref.name} to ${remote}`)
         break
     }
@@ -827,7 +810,7 @@ async function runRef ($: Engine, action: RefAction, ref: Ref) {
 async function fetchAll ($: Engine) {
   await note($, 'info', 'fetching…')
   try {
-    await git($, ['fetch', '--all', '--prune', '--tags'], [0], 300000)
+    await git($, cmd.fetchAll(), [0], 300000)
     await note($, 'ok', 'fetched every remote')
   } catch (error) {
     await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
@@ -842,7 +825,7 @@ async function pullRef ($: Engine, ref: Ref) {
     if (ref.kind === 'remote') {
       const graph = await read($, GRAPH)
       const target = splitRemote(ref.name, graph?.remotes ?? [])
-      await git($, ['fetch', target.remote, target.branch], [0], 120000)
+      await git($, cmd.fetchBranch(target.remote, target.branch), [0], 120000)
       await note($, 'ok', `fetched ${ref.name}`)
     } else {
       // Only fast-forwards: a pull that would merge is Claude's to resolve
@@ -859,7 +842,7 @@ async function renameBranch ($: Engine, from: string, value: string) {
   const to = value.trim()
   if (to === '' || to === from) return $.state.set(RENAMING_REF, null)
   try {
-    await git($, ['branch', '-m', from, to])
+    await git($, cmd.renameBranch(from, to))
     await $.state.set(RENAMING_REF, null)
     await $.state.set(REF_REF, null)
     await note($, 'ok', `renamed ${from} to ${to}`)
@@ -879,7 +862,7 @@ async function toggleStashing ($: Engine, target: string) {
 async function stashChanges ($: Engine, message: string) {
   if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
   try {
-    await git($, ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])])
+    await git($, cmd.stashPush(message))
     await $.state.set(STASHING_REF, null)
     await clearSelection($)
     await note($, 'ok', 'stashed the uncommitted changes')
@@ -901,9 +884,9 @@ async function stashAction ($: Engine, action: 'stash-apply' | StashAction, stas
   await $.state.set(PENDING_REF, null)
   if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
   const name = stash.stash ?? 'stash@{0}'
-  const verb = action.slice(6)
+  const verb = action.slice(6) as 'apply' | 'pop' | 'drop'
   try {
-    await git($, ['stash', verb, name])
+    await git($, cmd.stash(verb, name))
     await note($, 'ok', `${verb === 'drop' ? 'dropped' : verb === 'pop' ? 'popped' : 'applied'} ${name}`)
     if (verb !== 'apply') await clearSelection($)
   } catch (error) {
@@ -917,7 +900,7 @@ async function branchFromStash ($: Engine, stash: Commit, value: string) {
   const name = value.trim()
   if (name === '') return
   try {
-    await git($, ['stash', 'branch', name, stash.stash ?? 'stash@{0}'])
+    await git($, cmd.stashBranch(name, stash.stash ?? 'stash@{0}'))
     await clearSelection($)
     await note($, 'ok', `made branch ${name} from ${stash.stash}`)
   } catch (error) {
@@ -1339,7 +1322,7 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
   const armed = (action: CommitAction) => pending?.action === action && pending.hash === commit.hash
   /** A button that asks for a second click before it changes the repo. */
   const guarded = (action: CommitAction, label: string) => (
-    <Button key={action} label={armed(action) ? confirmText(action, commit, graph.branch) : label} plain dimColor={!armed(action)} onPress={() => arm($, action, commit.hash)} />
+    <Button key={action} label={armed(action) ? confirmText(action, commit, graph) : label} plain dimColor={!armed(action)} onPress={() => arm($, action, commit.hash)} />
   )
   const { Link } = ui
   const page = commitUrl(graph.forge, commit.hash)
@@ -1362,7 +1345,7 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
       <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
       {armed('reset') && (
         <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-          <Text color="yellow">{confirmText('reset', commit, graph.branch)}</Text>
+          <Text color="yellow">{confirmText('reset', commit, graph)}</Text>
           <Button key="reset-soft" label="soft: keep changes staged" plain onPress={() => run($, 'reset', commit.hash, 'soft')} />
           <Button key="reset-mixed" label="mixed: keep changes unstaged" plain onPress={() => run($, 'reset', commit.hash, 'mixed')} />
           <Button key="reset-hard" label="hard: discard changes" plain onPress={() => run($, 'reset', commit.hash, 'hard')} />

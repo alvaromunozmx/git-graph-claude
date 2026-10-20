@@ -1,6 +1,6 @@
 {
   "name": "git-graph-claude",
-  "version": "0.3.24",
+  "version": "0.3.25",
   "private": true,
   "description": "A Git Graph pane for Claude Code",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "scripts": {
     "test": "npm run test:node && npm run test:mod",
-    "test:node": "node --experimental-strip-types --test test/graph.node-test.ts",
+    "test:node": "node --experimental-strip-types --test test/graph.node-test.ts test/git.node-test.ts",
     "test:mod": "claude plugin test .",
     "validate": "claude plugin validate .",
     "zip": "node scripts/zip.mjs",

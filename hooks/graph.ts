@@ -104,11 +104,15 @@ export function parseDiff (stdout: string): { hunks: string; note?: string } {
 /** What `git stash list` is read with: hash, parents, name, author, date, subject. */
 export const STASH_FORMAT = ['%H', '%P', '%gd', '%an', '%ad', '%s'].join('%x1f')
 
-/** `git stash list --format=STASH_FORMAT` → one row per stash, leading to the commit it was made on. */
+/**
+ * `git stash list --format=STASH_FORMAT` → one row per stash, leading to the commit it was made on.
+ * The name comes from the stash's place in the list: with `--date` git writes `%gd` as a date
+ * (`stash@{19 Oct 2026 22:39}`), which two stashes of the same minute share.
+ */
 export function parseStashes (stdout: string): Commit[] {
-  return stdout.split('\n').filter(line => line.includes(SEP)).map(line => {
-    const [hash = '', parents = '', name = '', author = '', date = '', ...subject] = line.split(SEP)
-    return { hash, parents: parents.split(' ').slice(0, 1).filter(Boolean), refs: [], author, date, subject: subject.join(SEP), cells: [], kind: 'stash', stash: name }
+  return stdout.split('\n').filter(line => line.includes(SEP)).map((line, index) => {
+    const [hash = '', parents = '', , author = '', date = '', ...subject] = line.split(SEP)
+    return { hash, parents: parents.split(' ').slice(0, 1).filter(Boolean), refs: [], author, date, subject: subject.join(SEP), cells: [], kind: 'stash', stash: `stash@{${index}}` }
   })
 }
 
