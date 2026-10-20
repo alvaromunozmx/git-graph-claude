@@ -6,12 +6,13 @@
 //   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick) ask for a second click to confirm;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
+// - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, parseDiff, parseLog, parseNameStatus, parseStatus, WORKTREE, worktreeRow } from './graph'
+import { FORMAT, layout, matches, parseDiff, parseLog, parseNameStatus, parseStatus, splitMatch, WORKTREE, worktreeRow } from './graph'
 import type { Commit, Detail, Diff, FileChange, Graph, Note, Pending, Ref } from '../types'
 
 type Engine = EngineInterface
@@ -32,6 +33,7 @@ const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
+const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
@@ -41,6 +43,7 @@ const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
+const QUERY = atom(QUERY_REF, '')
 
 // One color per lane, cycling, like Git Graph's palette
 const LANE_COLORS = ['blue', 'magenta', 'green', 'yellow', 'cyan', 'red']
@@ -118,6 +121,7 @@ export const register: Register = (on, options) => {
     await clearSelection($)
     await $.state.set(SHOWN_REF, PAGE)
     await $.state.set(NOTE_REF, null)
+    await $.state.set(QUERY_REF, '')
     return next(e)
   })
 }
@@ -249,6 +253,12 @@ async function toggleAll ($: Engine) {
   await reload($)
 }
 
+async function find ($: Engine, value: string) {
+  // Kept as typed: the field is drawn from it, and a trimmed space would vanish while typing
+  await $.state.set(QUERY_REF, value)
+  await $.state.set(SHOWN_REF, PAGE)
+}
+
 async function toggleCompact ($: Engine) {
   await $.state.set(COMPACT_REF, !(await read($, COMPACT)))
 }
@@ -350,8 +360,8 @@ function cut (text: string, width: number) {
 }
 
 async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
-  const ui = $.ui.resolve(e)
-  const { Box, Button, Text } = ui
+  const ui: Ui = $.ui.resolve(e)
+  const { Box, Button, Input, Text } = ui
   const graph = await read($, GRAPH)
   const selected = await read($, SELECTED)
   const detail = await read($, DETAIL)
@@ -363,6 +373,10 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const shown = await read($, SHOWN)
   const columns = Math.max(40, e.props.bodyColumns)
   const count = graph?.commits.filter(commit => !commit.kind).length ?? 0
+  const typed = await read($, QUERY)
+  const query = typed.trim()
+  const found = query === '' ? graph?.commits ?? [] : (graph?.commits ?? []).filter(commit => matches(commit, query))
+  const matching = found.length
 
   const header = (
     <Box key="header" flexDirection="column">
@@ -378,6 +392,15 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Button key="reload" label="↻" plain onPress={() => reload($)} />
         </Box>
       </Box>
+      {ui.Input && graph && !graph.error && (
+        <Box flexDirection="row" columnGap={2}>
+          <Box flexGrow={1}>
+            <Input key="find" label="⌕ " placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
+          </Box>
+          {query !== '' && <Text dimColor>{`${matching} ${matching === 1 ? 'match' : 'matches'}`}</Text>}
+          {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
+        </Box>
+      )}
       {lastNote && <Text color={NOTE_COLOR[lastNote.kind]} wrap="truncate-end">{lastNote.text}</Text>}
     </Box>
   )
@@ -386,9 +409,13 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   if (graph.error) return <Box flexDirection="column">{header}<Text color="red">{graph.error}</Text></Box>
   if (graph.commits.length === 0) return <Box flexDirection="column">{header}<Text dimColor>No commits yet.</Text></Box>
 
-  const visible = graph.commits.slice(0, shown)
+  if (query !== '' && found.length === 0) return <Box flexDirection="column">{header}<Text> </Text><Text dimColor>{`No commit in the last ${count} matches “${query}”.`}</Text></Box>
+
+  const visible = found.slice(0, shown)
   // Compact drops the gap after every lane: half as wide, the junction glyphs still connect
   const cellsOf = (commit: Commit) => {
+    // Found commits are not neighbours: their lanes would not connect, so each keeps its dot alone
+    if (query !== '') return [{ ch: '●', lane: commit.cells.find(cell => cell.ch === '●')?.lane ?? 0 }]
     const cells = compact ? commit.cells.filter((_, i) => i % 2 === 0) : commit.cells
     // The uncommitted row is hollow: nothing is committed there yet
     return commit.kind === 'worktree' ? cells.map(cell => (cell.ch === '●' ? { ...cell, ch: '○' } : cell)) : cells
@@ -401,7 +428,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected }))
+    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query }))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, graph, graphWidth))
   }
 
@@ -410,11 +437,18 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       {header}
       <Text> </Text>
       {rows}
-      {graph.commits.length > shown && (
-        <Button key="more" label={`show ${Math.min(PAGE, graph.commits.length - shown)} more`} plain dimColor onPress={() => $.state.set(SHOWN_REF, shown + PAGE)} />
+      {found.length > shown && (
+        <Button key="more" label={`show ${Math.min(PAGE, found.length - shown)} more`} plain dimColor onPress={() => $.state.set(SHOWN_REF, shown + PAGE)} />
       )}
     </Box>
   )
+}
+
+/** A text with the part that matches the find field lit. */
+function drawLit (Text: any, text: string, query: string, style: Record<string, boolean>) {
+  const [before, lit, after] = splitMatch(text, query)
+  if (lit === '') return <Text {...style}>{text}</Text>
+  return <Text {...style}>{before}<Text color="yellow" bold underline>{lit}</Text>{after}</Text>
 }
 
 /** One graph cell, in a box one column wide so every row lines up in a proportional font. */
@@ -438,7 +472,7 @@ function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
 
 function drawRow (
   Box: any, Button: any, Text: any, $: Engine, commit: Commit, cells: Commit['cells'],
-  { graphWidth, textWidth, showMeta, isSelected }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean }
+  { graphWidth, textWidth, showMeta, isSelected, query }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string }
 ) {
   const isMerge = commit.parents.length > 1
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
@@ -462,12 +496,12 @@ function drawRow (
           {refs.map(({ ref, text }, i) => (
             <Text key={`ref-${i}`} color={REF_COLOR[ref.kind]} bold={ref.kind === 'head'}>{text}</Text>
           ))}
-          <Text dimColor={(isMerge || commit.kind === 'worktree') && !isSelected} italic={commit.kind === 'worktree'} bold={isSelected}>{cut(commit.subject, room)}</Text>
+          {drawLit(Text, cut(commit.subject, room), query, { dimColor: (isMerge || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
       {showMeta && (
         <Box width={AUTHOR_WIDTH + 1} flexShrink={0} marginLeft={1}>
-          <Text dimColor wrap="truncate-end">{commit.author}</Text>
+          <Text dimColor wrap="truncate-end">{drawLit(Text, commit.author, query, {})}</Text>
         </Box>
       )}
       {showMeta && (

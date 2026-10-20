@@ -180,3 +180,26 @@ test('an untracked file diffs against nothing', async ($, on) => {
   expect((await ui.find({ type: 'Code' }))?.props).toMatchObject({ source: '@@ -0,0 +1 @@\n+hello' })
   expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--no-index', '--', '/dev/null', 'notes.md'])
 })
+
+test('the find field keeps the commits that match, lit', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.input({ key: 'find', text: 'FIRST', kind: 'change' })
+    expect(await ui.find({ type: 'Text', text: 'first' })).toBeDefined()
+    expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
+    expect(await ui.find({ key: 'hash-b2' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '1 match' })).toBeDefined()
+    // A hash prefix and a ref name match too
+    await ui.input({ key: 'find', text: 'b2' })
+    expect(await ui.find({ key: 'hash-b2' })).toBeDefined()
+    await ui.input({ key: 'find', text: 'v1.0' })
+    expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
+    await ui.input({ key: 'find', text: 'nothing like it' })
+    expect(await ui.find({ type: 'Text', text: /No commit in the last 2 matches/ })).toBeDefined()
+    await ui.press({ key: 'find-clear' })
+    expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
+    expect(await ui.find({ key: 'hash-b2' })).toBeDefined()
+  }
+})

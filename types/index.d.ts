@@ -50,6 +50,8 @@ declare module 'claude-code' {
       compact: boolean
       pending: Pending | null
       note: Note | null
+      /** What the find field holds: rows that match it are the only ones drawn */
+      query: string
     }
   }
 }
