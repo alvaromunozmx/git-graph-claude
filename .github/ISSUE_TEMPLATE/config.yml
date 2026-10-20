@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "/git-graph doesn't appear"
+    url: https://github.com/alvaromunozmx/git-graph-claude#if-git-graph-doesnt-appear
+    about: Check the requirements and the install steps first
