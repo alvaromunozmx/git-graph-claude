@@ -67,6 +67,27 @@ export function parseDiff (stdout: string): { hunks: string; note?: string } {
   return { hunks: cut > 0 ? hunks.slice(0, cut) : hunks.slice(0, DIFF_LIMIT), note: `The diff is longer than the pane shows: ${Math.round(hunks.length / 1000)}k characters.` }
 }
 
+/** What `git stash list` is read with: hash, parents, name, author, date, subject. */
+export const STASH_FORMAT = ['%H', '%P', '%gd', '%an', '%ad', '%s'].join('%x1f')
+
+/** `git stash list --format=STASH_FORMAT` → one row per stash, leading to the commit it was made on. */
+export function parseStashes (stdout: string): Commit[] {
+  return stdout.split('\n').filter(line => line.includes(SEP)).map(line => {
+    const [hash = '', parents = '', name = '', author = '', date = '', ...subject] = line.split(SEP)
+    return { hash, parents: parents.split(' ').slice(0, 1).filter(Boolean), refs: [], author, date, subject: subject.join(SEP), cells: [], kind: 'stash', stash: name }
+  })
+}
+
+/** Puts each stash just above the commit it was made on, so the layout forks it off there. */
+export function withStashes (commits: Commit[], stashes: Commit[]): Commit[] {
+  const result = [...commits]
+  for (const stash of stashes) {
+    const at = result.findIndex(commit => commit.hash === stash.parents[0])
+    if (at !== -1) result.splice(at, 0, stash)
+  }
+  return result
+}
+
 /** The row that stands for uncommitted changes, drawn above the commit it would follow. */
 export function worktreeRow (changes: FileChange[], head: string | null): Commit {
   return {

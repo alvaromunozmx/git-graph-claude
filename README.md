@@ -18,7 +18,8 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - `/git-graph` opens the pane: commits laid out in lanes, with the checked-out branch, local and remote branches and tags (◆) as badges, plus author, date and hash. It adapts to the pane's width.
 - The header shows the current branch and how many files have uncommitted changes.
 - **⌕ find** keeps only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
-- **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files, and **✎ commit…** to have Claude propose a message and commit them.
+- **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
+- **Stashes** (◈) fork off the commit they were made on, while every branch is drawn. Open one to **apply** it, **pop** it, make a **branch…** from it or **drop** it.
 - **spaced / compact** switches between lanes with a gap and lanes side by side.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.

@@ -12,13 +12,14 @@
 // - ⇣ fetch brings every remote's branches and tags, pruning the ones deleted there.
 // - The branch picker draws every branch, the current one, or any one branch alone.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
-// - Uncommitted changes get a row of their own above the commit they would follow.
+// - Uncommitted changes get a row of their own above the commit they would follow; stashes
+//   fork off the commit they were made on, to apply, pop, drop or branch from.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStatus, parseTagInput, splitMatch, WORKTREE, worktreeRow } from './graph'
-import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode } from '../types'
+import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, withStashes, WORKTREE, worktreeRow } from './graph'
+import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -42,6 +43,7 @@ const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
 const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
 const TAGGING_REF = { plugin: 'git-graph', key: 'tagging' } as const
 const REF_REF = { plugin: 'git-graph', key: 'ref' } as const
+const STASHING_REF = { plugin: 'git-graph', key: 'stashing' } as const
 const RENAMING_REF = { plugin: 'git-graph', key: 'renaming' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
@@ -56,6 +58,7 @@ const NOTE = atom(NOTE_REF, null)
 const QUERY = atom(QUERY_REF, '')
 const TAGGING = atom(TAGGING_REF, null)
 const REF = atom(REF_REF, null)
+const STASHING = atom(STASHING_REF, null)
 const RENAMING = atom(RENAMING_REF, null)
 
 // One color per lane, cycling, like Git Graph's palette
@@ -169,18 +172,21 @@ async function load ($: Engine) {
       filter = null
       await $.state.set(FILTER_REF, null)
     }
-    const [remoteList, branch, head, status, log] = await Promise.all([
+    const [remoteList, branch, head, status, stashList, log] = await Promise.all([
       git($, ['remote']),
       git($, ['branch', '--show-current']).catch(() => ''),
       git($, ['rev-parse', 'HEAD']).catch(() => ''),
       git($, ['status', '--porcelain=v1', '-uall']).catch(() => ''),
+      // Stashes belong with every branch, not with one drawn alone
+      filter === null && allBranches ? git($, ['stash', 'list', `--format=${STASH_FORMAT}`, '--date=format:%d %b %Y %H:%M']).catch(() => '') : Promise.resolve(''),
       git($, [
-        'log', ...(filter !== null ? [filter] : allBranches ? ['--all'] : []), '--topo-order', `-n${limit}`,
+        // The stash ref is drawn from the stash list instead, one row per stash
+        'log', ...(filter !== null ? [filter] : allBranches ? ['--exclude=refs/stash', '--all'] : []), '--topo-order', `-n${limit}`,
         `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M', '--'
       ])
     ])
     const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
-    const parsed = parseLog(log, new Set(remotes))
+    const parsed = withStashes(parseLog(log, new Set(remotes)), parseStashes(stashList))
     const changes = parseStatus(status)
     // The uncommitted row leads to HEAD, so the layout draws its line down to it
     const headHash = head.trim()
@@ -213,6 +219,7 @@ async function clearSelection ($: Engine) {
   await $.state.set(DIFF_REF, null)
   await $.state.set(PENDING_REF, null)
   await $.state.set(TAGGING_REF, null)
+  await $.state.set(STASHING_REF, null)
 }
 
 async function select ($: Engine, hash: string) {
@@ -610,6 +617,63 @@ async function renameBranch ($: Engine, from: string, value: string) {
   await reload($)
 }
 
+// ── Stashes ────────────────────────────────────────────────────────────────────
+
+async function toggleStashing ($: Engine, target: string) {
+  await $.state.set(STASHING_REF, (await read($, STASHING)) === target ? null : target)
+}
+
+/** Stashes the uncommitted changes, untracked files included, with the message given, if any. */
+async function stashChanges ($: Engine, message: string) {
+  if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
+  try {
+    await git($, ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])])
+    await $.state.set(STASHING_REF, null)
+    await clearSelection($)
+    await note($, 'ok', 'stashed the uncommitted changes')
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
+/** Apply keeps the stash and runs on one click; pop and drop lose it, so they ask first. */
+async function stashAction ($: Engine, action: 'stash-apply' | StashAction, stash: Commit) {
+  if (action !== 'stash-apply') {
+    const pending = await read($, PENDING)
+    if (!pending || pending.action !== action || pending.hash !== stash.hash) {
+      await $.state.set(PENDING_REF, { action, hash: stash.hash })
+      return
+    }
+  }
+  await $.state.set(PENDING_REF, null)
+  if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
+  const name = stash.stash ?? 'stash@{0}'
+  const verb = action.slice(6)
+  try {
+    await git($, ['stash', verb, name])
+    await note($, 'ok', `${verb === 'drop' ? 'dropped' : verb === 'pop' ? 'popped' : 'applied'} ${name}`)
+    if (verb !== 'apply') await clearSelection($)
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
+/** A new branch at the commit the stash was made on, with the stash applied and dropped. */
+async function branchFromStash ($: Engine, stash: Commit, value: string) {
+  const name = value.trim()
+  if (name === '') return
+  try {
+    await git($, ['stash', 'branch', name, stash.stash ?? 'stash@{0}'])
+    await clearSelection($)
+    await note($, 'ok', `made branch ${name} from ${stash.stash}`)
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
 /** Writing the message is Claude's job: it proposes one and asks before committing. */
 async function commitChanges ($: Engine) {
   await ask($, 'Commit the current uncommitted changes. Look at the diff, propose a commit message and ask me before committing.', 'asked Claude to commit the changes')
@@ -650,6 +714,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const compact = await read($, COMPACT)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
+  const stashing = await read($, STASHING)
   const openRef = await read($, REF)
   const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
@@ -715,7 +780,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     if (query !== '') return [{ ch: '●', lane: commit.cells.find(cell => cell.ch === '●')?.lane ?? 0 }]
     const cells = compact ? commit.cells.filter((_, i) => i % 2 === 0) : commit.cells
     // The uncommitted row is hollow: nothing is committed there yet
-    return commit.kind === 'worktree' ? cells.map(cell => (cell.ch === '●' ? { ...cell, ch: '○' } : cell)) : cells
+    const node = commit.kind === 'worktree' ? '○' : commit.kind === 'stash' ? '◈' : '●'
+    return node === '●' ? cells : cells.map(cell => (cell.ch === '●' ? { ...cell, ch: node } : cell))
   }
   const graphWidth = Math.max(...visible.map(commit => cellsOf(commit).length)) + 1
   const metaWidth = AUTHOR_WIDTH + DATE_WIDTH + 2
@@ -728,7 +794,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
-    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, tagging === commit.hash, graph, graphWidth))
+    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash }, graph, graphWidth))
   }
 
   return (
@@ -800,8 +866,9 @@ function drawRow (
             </Button>
           )
         })}
+        {commit.stash && <Text color="cyan">{`[${commit.stash}] `}</Text>}
         <Text wrap="truncate-end">
-          {drawLit(Text, cut(commit.subject, room), query, { dimColor: (isMerge || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
+          {drawLit(Text, cut(commit.subject, room - (commit.stash ? commit.stash.length + 3 : 0)), query, { dimColor: (isMerge || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
       {showMeta && (
@@ -824,15 +891,19 @@ function drawRow (
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
   ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
-  pending: Pending | null, isTagging: boolean, graph: Graph, graphWidth: number
+  pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean }, graph: Graph, graphWidth: number
 ) {
   const { Box, Text } = ui
   const isWorktree = commit.kind === 'worktree'
 
   return (
     <Box key={`detail-${commit.hash}`} flexDirection="column" marginLeft={graphWidth} marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.hash}</Text>
-      {isWorktree ? drawWorktreeActions(ui, $) : drawCommitActions(ui, $, commit, pending, isTagging, graph)}
+      <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.stash ? `${commit.stash}  ${commit.hash}` : commit.hash}</Text>
+      {isWorktree
+        ? drawWorktreeActions(ui, $, fields.isStashing)
+        : commit.kind === 'stash'
+          ? drawStashActions(ui, $, commit, pending, fields.isStashing)
+          : drawCommitActions(ui, $, commit, pending, fields.isTagging, graph)}
       <Text> </Text>
       {!detail || detail.isLoading
         ? <Text dimColor>Loading…</Text>
@@ -841,11 +912,35 @@ function drawDetail (
   )
 }
 
-function drawWorktreeActions (ui: Ui, $: Engine) {
-  const { Box, Button } = ui
+function drawWorktreeActions (ui: Ui, $: Engine, isStashing: boolean) {
+  const { Box, Button, Input } = ui
   return (
-    <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-      <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
+        {Input && <Button key="stash" label="⊟ stash…" plain dimColor onPress={() => toggleStashing($, WORKTREE)} />}
+      </Box>
+      {isStashing && Input && (
+        <Input key="stash-message" label="⊟ " placeholder="a message for the stash, or none" submitLabel="stash" autoFocus onSubmit={(value: string) => stashChanges($, value)} />
+      )}
+    </Box>
+  )
+}
+
+function drawStashActions (ui: Ui, $: Engine, stash: Commit, pending: Pending | null, isBranching: boolean) {
+  const { Box, Button, Input } = ui
+  const armed = (action: StashAction) => pending?.action === action && pending.hash === stash.hash
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Button key="stash-apply" label="⇣ apply" plain onPress={() => stashAction($, 'stash-apply', stash)} />
+        <Button key="stash-pop" label={armed('stash-pop') ? `confirm: apply and drop ${stash.stash}?` : '⇣ pop'} plain dimColor={!armed('stash-pop')} onPress={() => stashAction($, 'stash-pop', stash)} />
+        {Input && <Button key="stash-branch" label="+ branch…" plain dimColor onPress={() => toggleStashing($, stash.hash)} />}
+        <Button key="stash-drop" label={armed('stash-drop') ? `confirm: drop ${stash.stash}?` : '✕ drop'} plain dimColor={!armed('stash-drop')} onPress={() => stashAction($, 'stash-drop', stash)} />
+      </Box>
+      {isBranching && Input && (
+        <Input key="stash-branch-name" label="+ " placeholder="a name for the new branch" submitLabel="branch" autoFocus onSubmit={(value: string) => branchFromStash($, stash, value)} />
+      )}
     </Box>
   )
 }
