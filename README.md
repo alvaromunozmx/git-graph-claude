@@ -21,6 +21,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files, and **✎ commit…** to have Claude propose a message and commit them.
 - **spaced / compact** switches between lanes with a gap and lanes side by side.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
+- **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; the current branch also **pull**s (fast-forward only).

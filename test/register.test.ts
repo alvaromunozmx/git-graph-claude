@@ -374,3 +374,21 @@ test('a tag pushes and deletes', async ($, on) => {
   await ui.press({ key: 'delete-tag' })
   expect(seen.git.findLast(args => args[0] === 'tag')).toEqual(['tag', '-d', 'v1.0'])
 })
+
+test('fetch brings every remote, pruned', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'fetch' })
+  expect(seen.git.findLast(args => args[0] === 'fetch')).toEqual(['fetch', '--all', '--prune', '--tags'])
+  expect(await ui.find({ type: 'Text', text: 'fetched every remote' })).toBeDefined()
+  // The log is read again after it
+  expect(seen.git.at(-1)?.[0]).not.toBe('fetch')
+})
+
+test('a repo with no remote has no fetch', async ($, on) => {
+  world(on, { remote: '' })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ key: 'fetch' })).toBeUndefined()
+})
