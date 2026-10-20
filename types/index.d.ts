@@ -1,8 +1,9 @@
 /**
  * One cell of the graph column: a glyph and the lane it belongs to. A commit's own cell also
  * says whether its lane comes from above (a child waits for it) and goes on below (a parent).
+ * `across` is the lane of a horizontal line that passes through a cell drawing something else.
  */
-export type Cell = { ch: string; lane: number; up?: boolean; down?: boolean }
+export type Cell = { ch: string; lane: number; up?: boolean; down?: boolean; across?: number }
 
 export type Ref = { name: string; kind: 'head' | 'local' | 'remote' | 'tag' }
 
