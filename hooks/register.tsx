@@ -36,7 +36,8 @@ type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }
 type Ui = any
 
 const PANE = 'git-graph'
-// Rows drawn at once; "show more" adds another page
+// Rows drawn at once: older and newer pages replace them. Every row goes to the surface on each
+// redraw, so the page keeps that bounded however long the history is
 const PAGE = 40
 
 const GRAPH_REF = { plugin: 'git-graph', key: 'graph' } as const
@@ -47,7 +48,7 @@ const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
 const REPO_REF = { plugin: 'git-graph', key: 'repo' } as const
 const PICKER_REDRAW_REF = { plugin: 'git-graph', key: 'pickerRedraw' } as const
-const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
+const PAGE_START_REF = { plugin: 'git-graph', key: 'pageStart' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
 const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
@@ -73,7 +74,7 @@ const ALL = atom(ALL_REF, true)
 const FILTER = atom(FILTER_REF, null)
 const REPO = atom(REPO_REF, null)
 const PICKER_REDRAW = atom(PICKER_REDRAW_REF, 0)
-const SHOWN = atom(SHOWN_REF, PAGE)
+const PAGE_START = atom(PAGE_START_REF, 0)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
@@ -176,7 +177,7 @@ export const register: Register = (on, options) => {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     isOpen = false
     await clearSelection($)
-    await $.state.set(SHOWN_REF, PAGE)
+    await $.state.set(PAGE_START_REF, 0)
     await $.state.set(NOTE_REF, null)
     await $.state.set(QUERY_REF, '')
     await $.state.set(REF_REF, null)
@@ -379,7 +380,8 @@ async function step ($: Engine, by: 1 | -1) {
   if (rows.length === 0) return
   const selected = await read($, SELECTED)
   const at = rows.findIndex(commit => commit.hash === selected)
-  const next = at === -1 ? (by === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by))
+  // With nothing open, either key starts at the top of the page drawn
+  const next = at === -1 ? Math.min(rows.length - 1, await read($, PAGE_START)) : Math.min(rows.length - 1, Math.max(0, at + by))
   await reveal($, next)
   const target = rows[next]
   if (target && target.hash !== selected) await openCommit($, target.hash)
@@ -395,10 +397,10 @@ async function goHead ($: Engine) {
   if (target && target.hash !== (await read($, SELECTED))) await openCommit($, target.hash)
 }
 
-/** Shows pages until the row at `index` is drawn. */
+/** Turns to the page that draws the row at `index`. */
 async function reveal ($: Engine, index: number) {
-  const shown = await read($, SHOWN)
-  if (index >= shown) await $.state.set(SHOWN_REF, (Math.floor(index / PAGE) + 1) * PAGE)
+  const start = Math.floor(index / PAGE) * PAGE
+  if (start !== (await read($, PAGE_START))) await $.state.set(PAGE_START_REF, start)
 }
 
 /** s: the focus goes to the find field. */
@@ -465,7 +467,7 @@ async function pickRepo ($: Engine, path: string) {
   await $.state.set(FILTER_REF, null)
   await $.state.set(COMPARE_REF, null)
   await $.state.set(REF_REF, null)
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
   await clearSelection($)
   await reload($)
 }
@@ -480,14 +482,14 @@ async function pickBranches ($: Engine, value: string) {
   } else {
     await $.state.set(FILTER_REF, value.slice(4))
   }
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
   await reload($)
 }
 
 async function find ($: Engine, value: string) {
   // Kept as typed: the field is drawn from it, and a trimmed space would vanish while typing
   await $.state.set(QUERY_REF, value)
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
 }
 
 async function toggleCompact ($: Engine) {
@@ -997,7 +999,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const openRef = await read($, REF)
   const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
-  const shown = await read($, SHOWN)
+  const pageStart = await read($, PAGE_START)
   const columns = Math.max(40, e.props.bodyColumns)
   const count = graph?.commits.filter(commit => !commit.kind).length ?? 0
   const typed = await read($, QUERY)
@@ -1085,7 +1087,10 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 
   if (query !== '' && found.length === 0) return <Box flexDirection="column">{header}<Text> </Text><Text dimColor>{`No commit in the last ${count} matches “${query}”.`}</Text></Box>
 
-  const visible = found.slice(0, shown)
+  // The page drawn, kept inside the rows found when they shrink under it
+  const start = Math.min(pageStart, Math.max(0, Math.floor((found.length - 1) / PAGE) * PAGE))
+  const visible = found.slice(start, start + PAGE)
+  const end = start + visible.length
   // Compact drops the gap after every lane: half as wide, the junction glyphs still connect
   const cellsOf = (commit: Commit) => {
     // Found commits are not neighbours: their lanes would not connect, so each keeps its dot alone
@@ -1122,9 +1127,13 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     <Box flexDirection="column">
       {header}
       <Text> </Text>
+      {start > 0 && <Button key="newer" label={`▴ newer ${Math.min(PAGE, start)}`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, Math.max(0, start - PAGE))} />}
       {rows}
-      {found.length > shown && (
-        <Button key="more" label={`show ${Math.min(PAGE, found.length - shown)} more`} plain dimColor onPress={() => $.state.set(SHOWN_REF, shown + PAGE)} />
+      {found.length > PAGE && (
+        <Box key="pages" flexDirection="row" columnGap={2}>
+          {end < found.length && <Button key="older" label={`older ${Math.min(PAGE, found.length - end)} ▾`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, end)} />}
+          <Text dimColor>{`${start + 1}–${end} of ${found.length}`}</Text>
+        </Box>
       )}
       <Text> </Text>
       <Box key="keys" flexDirection="row" columnGap={2} flexWrap="wrap">

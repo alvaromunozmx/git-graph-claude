@@ -41,7 +41,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
-- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit, `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
+- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit (turning the page at its edges; with none open, the first of the page), `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; **pull from origin/…** moves it to its upstream, fast-forward only, checked out or not, and a line says what a push and a pull would move (`↑1 to push, ↓2 to pull · origin/main`).
   - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
@@ -64,7 +64,7 @@ Actions that change the repo need a second click to confirm and wait for Claude 
 
 ## Settings
 
-`limit`: how many commits to load (150 by default). They are drawn 40 at a time.
+`limit`: how many commits to load (150 by default). They are drawn a page of 40 at a time: **older ▾** and **▴ newer** turn the page.
 
 ## How it works
 

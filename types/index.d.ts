@@ -113,7 +113,8 @@ declare module 'claude-code' {
       pickerRedraw: number
       /** One branch to draw alone, picked in the header; null: every branch or the current one */
       branchFilter: string | null
-      shown: number
+      /** Where the page of rows drawn starts, in the rows the find field keeps */
+      pageStart: number
       compact: boolean
       /** The settings row under the header is open */
       settingsOpen: boolean
