@@ -145,6 +145,8 @@ test('uncommitted changes get a row above HEAD that lists them', async ($, on) =
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     expect(await ui.find({ type: 'Text', text: 'Uncommitted Changes (2)' })).toBeDefined()
+    // As wide as a hash, so it is as easy to press
+    expect((await ui.find({ key: 'hash-worktree' }))?.props.label).toBe('*******')
     expect(await ui.find({ type: 'Text', text: '● 2 uncommitted' })).toBeDefined()
     await ui.press({ key: 'hash-worktree' })
     expect(await ui.find({ type: 'Text', text: '2 files changed in the working tree' })).toBeDefined()
@@ -786,6 +788,32 @@ test('a commit panel has a title, quick links and its actions in groups', async 
     expect((await ui.find({ key: 'revert' }))?.props).toMatchObject({ variant: 'primary', label: 'confirm: revert a1 on main?' })
     expect((await ui.find({ key: 'merge' }))?.props.variant).toBeUndefined()
     await ui.press({ key: 'hash-a1' })
+  }
+})
+
+/** An element's descendants as drawn, itself first, each with its tag and key. */
+function descendants (element: unknown): Array<{ type: string; key: unknown }> {
+  if (!element || typeof element !== 'object') return []
+  const found = element as { type: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
+  return [{ type: found.type, key: found.key ?? found.props?.key }, ...(found.children ?? []).flatMap(descendants)]
+}
+
+test('the terminal draws a panel\'s web link under its title, so the title reads whole', async ($, on) => {
+  world(on, { remote: args => (args[0] === 'get-url' ? 'git@github.com:o/r.git\n' : 'origin\n') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    expect(await ui.find({ type: 'Text', text: 'Commit b2' })).toBeDefined()
+    expect((await ui.find({ type: 'Link' }))?.props).toMatchObject({ href: 'https://github.com/o/r/commit/b2', label: '↗ github.com' })
+    // The title's row: the one that holds the title and its copy buttons, not the actions under them
+    const rows = await ui.findAll({ type: 'Box' })
+    const titleRow = rows.find(row => row.props.flexDirection === 'row' && row.text.includes('Commit b2') &&
+      descendants(row).some(e => e.key === 'copy-subject') && !descendants(row).some(e => e.key === 'revert'))
+    expect(titleRow).toBeDefined()
+    // The terminal draws a Link's URL beside its label, so there it leaves the title's row;
+    // desktop draws the label alone, beside the copy buttons
+    expect(descendants(titleRow).some(e => e.type === 'Link')).toBe(surface === 'desktop')
+    await ui.press({ key: 'hash-b2' })
   }
 })
 

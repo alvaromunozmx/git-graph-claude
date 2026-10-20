@@ -1312,7 +1312,7 @@ function drawRow (
         </Box>
       )}
       <Box width={HASH_WIDTH + 2} flexShrink={0} justifyContent="flex-end">
-        <Button key={`hash-${commit.hash}`} label={commit.kind === 'worktree' ? '*' : commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
+        <Button key={`hash-${commit.hash}`} label={commit.kind === 'worktree' ? '*'.repeat(HASH_WIDTH) : commit.hash.slice(0, HASH_WIDTH)} plain dimColor={!isSelected} onPress={() => select($, commit.hash)} />
       </Box>
     </Box>
   )
@@ -1371,15 +1371,31 @@ function drawDetail (
   )
 }
 
-/** A panel's first line: its title on the left, quick links (copy, the web page) on the right. */
-function drawPanelTitle (ui: Ui, title: string, subtitle: string, color: string, quick: unknown[]) {
-  const { Box, Text } = ui
-  return (
+/** A link to a page on the forge, for a panel's title line. */
+type WebLink = { key: string; href: string; label: string }
+
+/**
+ * A panel's first line: its title on the left, quick links (copy, the web page) on the right.
+ * The terminal draws a Link's URL beside its label, which would squeeze the title away, so
+ * there the web page gets a line of its own under the title.
+ */
+function drawPanelTitle (ui: Ui, title: string, subtitle: string, color: string, quick: unknown[], web: WebLink | null = null) {
+  const { Box, Link, Text } = ui
+  const link = web && <Link key={web.key} href={web.href} label={web.label} />
+  const isTerminal = !ui.Svg
+  const titleLine = (
     <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
       <Box flexShrink={1}>
         <Text wrap="truncate-end"><Text color={color} bold>{title}</Text><Text dimColor>{subtitle ? `  ${subtitle}` : ''}</Text></Text>
       </Box>
-      <Box flexDirection="row" columnGap={2} flexShrink={0}>{quick.filter(Boolean)}</Box>
+      <Box flexDirection="row" columnGap={2} flexShrink={0}>{[...quick, !isTerminal && link].filter(Boolean)}</Box>
+    </Box>
+  )
+  if (!isTerminal || !link) return titleLine
+  return (
+    <Box flexDirection="column">
+      {titleLine}
+      {link}
     </Box>
   )
 }
@@ -1451,7 +1467,7 @@ function drawStashActions (ui: Ui, $: Engine, stash: Commit, pending: Pending | 
 }
 
 function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending | null, isTagging: boolean, graph: Graph, compare: unknown) {
-  const { Box, Input, Link, Text } = ui
+  const { Box, Input, Text } = ui
   const isHead = commit.refs.some(ref => ref.kind === 'head')
   const armed = (item: CommitAction) => pending?.action === item && pending.hash === commit.hash
   /** A button that asks for a second press before it changes the repo. */
@@ -1462,9 +1478,8 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
     <Box flexDirection="column">
       {drawPanelTitle(ui, `Commit ${commit.hash.slice(0, HASH_WIDTH)}`, isHead ? `HEAD · ${graph.branch}` : '', 'yellow', [
         quickButton(ui, 'copy', '⧉ hash', () => copyText($, commit.hash, commit.hash.slice(0, HASH_WIDTH))),
-        quickButton(ui, 'copy-subject', '⧉ subject', () => copyText($, commit.subject, 'the subject')),
-        page && <Link key="web" href={page} label={`↗ ${graph.forge?.host}`} />
-      ])}
+        quickButton(ui, 'copy-subject', '⧉ subject', () => copyText($, commit.subject, 'the subject'))
+      ], page ? { key: 'web', href: page, label: `↗ ${graph.forge?.host}` } : null)}
       {drawToolbar(ui, [
         [
           !isHead && guarded('checkout', '⎇ Checkout'),
@@ -1498,7 +1513,7 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
 
 /** A badge's actions, under its row: what fits its kind, and whether it is checked out. */
 function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph) {
-  const { Box, Input, Link, Text } = ui
+  const { Box, Input, Text } = ui
   const isCurrent = ref.kind === 'head'
   const branchName = ref.kind === 'remote' ? splitRemote(ref.name, graph.remotes).branch : ref.name
   const pullRequest = ref.kind !== 'tag' && ref.name !== 'HEAD' ? pullRequestUrl(graph.forge, branchName, graph.defaultBranch) : null
@@ -1513,9 +1528,8 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
   return (
     <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
       {drawPanelTitle(ui, `${kind} ${ref.name}`, '', REF_COLOR[ref.kind], [
-        quickButton(ui, 'copy-name', '⧉ name', () => copyText($, ref.name, ref.name)),
-        pullRequest && <Link key="pull-request" href={pullRequest} label={`↗ pull request into ${graph.defaultBranch}`} />
-      ])}
+        quickButton(ui, 'copy-name', '⧉ name', () => copyText($, ref.name, ref.name))
+      ], pullRequest ? { key: 'pull-request', href: pullRequest, label: `↗ pull request into ${graph.defaultBranch}` } : null)}
       {upstream && <Text color={upstream.behind > 0 || upstream.isGone ? 'yellow' : 'gray'} wrap="truncate-end">{describeUpstream(upstream)}</Text>}
       {drawToolbar(ui, [
         [

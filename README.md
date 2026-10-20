@@ -32,7 +32,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **The header** has two lines. The first says where the repo stands (`⎇ main`, how many files have uncommitted changes, how many commits are drawn), with the branch picker, **⇣ fetch**, **↻** and **⚙ settings** on the right. The second finds (**⌕** and the find field) on the left and walks the rows on the right: **↑ ↓** for the previous and next commit and **HEAD** for the commit HEAD points at. A narrow pane wraps each line's right side under its left.
 - A finished action (checkout, merge, push…) says so in a toast, since the pane already shows what it changed. The line under the header keeps errors, until the next action, and what is under way (`fetching…`).
 - **⌕** and the find field keep only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
-- **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
+- **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*******` (where a commit has its hash) to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
 - **Stashes** (◈) fork off the commit they were made on, while every branch is drawn. Open one to **apply** it, **pop** it, make a **branch…** from it or **drop** it.
 - **⚙ settings** opens the settings, kept between sessions, as a panel with a line per group:
   - **Lanes**: **spaced / compact** (with a gap, or side by side) and **curves / glyphs** (in Claude Desktop the lanes are SVG curves and dots by default, like Git Graph; the terminal draws them with box-drawing glyphs).
@@ -61,9 +61,9 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
-Uncommitted changes, opened: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**.
+Uncommitted changes, opened from their `*******`: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**, here with a new file's diff open.
 
-<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
+<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, one with its diff open, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
 
 A commit, opened: its actions in groups, the author and date, its lines added and deleted, its message with links, and its files, each opening its diff.
 
@@ -104,4 +104,6 @@ It is a Claude Code *mod*: [`hooks/register.tsx`](hooks/register.tsx) registers 
 
 To release: `npm version patch` (or `minor`, `major`) bumps `package.json`, `plugin.json` and `marketplace.json` together and tags the commit; `git push --follow-tags` publishes a GitHub release with the zip. Users update with `/plugin marketplace update git-graph-claude`.
 
-MIT © Alvaro Muñoz
+## License
+
+[MIT](LICENSE) © Alvaro Muñoz
