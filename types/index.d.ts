@@ -17,8 +17,11 @@ export type Commit = {
   stash?: string
 }
 
-/** A file a commit (or the working tree) changed: A, M, D, R, C, T or ? (untracked). */
-export type FileChange = { status: string; path: string; oldPath?: string }
+/**
+ * A file a commit (or the working tree) changed: A, M, D, R, C, T or ? (untracked), with the
+ * lines it added and deleted, when they are known; a binary file has no lines.
+ */
+export type FileChange = { status: string; path: string; oldPath?: string; added?: number; deleted?: number; isBinary?: true }
 
 export type Graph = {
   commits: Commit[]

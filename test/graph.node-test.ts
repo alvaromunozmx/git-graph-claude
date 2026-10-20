@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, withStashes, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -109,4 +109,16 @@ test('a stash forks off the commit it was made on', () => {
   const commits = withStashes(parseLog(log([['c', 'b'], ['b', 'a'], ['a', '']]), new Set()), stashes)
   assert.deepEqual(commits.map(commit => commit.hash), ['c', 's', 'b', 'a'])
   assert.deepEqual(layout(commits).map(draw), ['●', '│ ●', '●─╯', '●'])
+})
+
+test('numstat counts lines per file, renames by their new path, binaries apart', () => {
+  const stats = parseNumstat('12\t3\tsrc/a.ts\n-\t-\tlogo.png\n4\t0\tsrc/{old => new}/b.ts\n1\t1\tx.ts => y.ts\n')
+  assert.deepEqual(stats.get('src/a.ts'), { added: 12, deleted: 3 })
+  assert.equal(stats.get('logo.png'), 'binary')
+  assert.deepEqual(stats.get('src/new/b.ts'), { added: 4, deleted: 0 })
+  assert.deepEqual(stats.get('y.ts'), { added: 1, deleted: 1 })
+  const files = withStats([{ status: 'M', path: 'src/a.ts' }, { status: 'A', path: 'logo.png' }], stats)
+  assert.deepEqual(files, [{ status: 'M', path: 'src/a.ts', added: 12, deleted: 3 }, { status: 'A', path: 'logo.png', isBinary: true }])
+  assert.equal(summary(files), '2 files changed, +12 −3')
+  assert.equal(summary([{ status: 'M', path: 'a' }]), '1 file changed')
 })

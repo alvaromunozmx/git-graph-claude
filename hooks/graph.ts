@@ -88,6 +88,43 @@ export function withStashes (commits: Commit[], stashes: Commit[]): Commit[] {
   return result
 }
 
+/** A numstat path → the file's path now: `src/{a => b}.ts` and `a => b` name the new one. */
+function numstatPath (path: string): string {
+  const braces = path.match(/^(.*)\{(.*) => (.*)\}(.*)$/)
+  if (braces) return `${braces[1]}${braces[3]}${braces[4]}`.replace('//', '/')
+  const arrow = path.indexOf(' => ')
+  return arrow === -1 ? path : path.slice(arrow + 4)
+}
+
+/** `--numstat` → lines added and deleted per path; `-` for both is a binary file. */
+export function parseNumstat (stdout: string): Map<string, { added: number; deleted: number } | 'binary'> {
+  const stats = new Map<string, { added: number; deleted: number } | 'binary'>()
+  for (const line of stdout.split('\n')) {
+    const [added = '', deleted = '', ...rest] = line.split('\t')
+    if (rest.length === 0) continue
+    const path = numstatPath(rest.join('\t'))
+    stats.set(path, added === '-' ? 'binary' : { added: Number(added), deleted: Number(deleted) })
+  }
+  return stats
+}
+
+/** The files with their line counts, where the numstat has them. */
+export function withStats (files: FileChange[], stats: ReturnType<typeof parseNumstat>): FileChange[] {
+  return files.map(file => {
+    const stat = stats.get(file.path)
+    if (stat === undefined) return file
+    return stat === 'binary' ? { ...file, isBinary: true } : { ...file, added: stat.added, deleted: stat.deleted }
+  })
+}
+
+/** `3 files changed, +40 −12`: the files and the lines they add and delete in all. */
+export function summary (files: FileChange[]): string {
+  const count = `${files.length} ${files.length === 1 ? 'file' : 'files'} changed`
+  const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0)
+  const deleted = files.reduce((sum, file) => sum + (file.deleted ?? 0), 0)
+  return files.some(file => file.added !== undefined) ? `${count}, +${added} −${deleted}` : count
+}
+
 /** The row that stands for uncommitted changes, drawn above the commit it would follow. */
 export function worktreeRow (changes: FileChange[], head: string | null): Commit {
   return {

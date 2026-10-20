@@ -19,7 +19,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, withStashes, WORKTREE, worktreeRow } from './graph'
+import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -242,18 +242,22 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
   const base = await read($, COMPARE)
   if (base !== null && base !== hash && graph) return readComparison($, graph, base, hash)
   if (hash === WORKTREE) {
-    const files = graph?.changes ?? []
-    return { hash, meta: `${files.length} ${files.length === 1 ? 'file' : 'files'} changed in the working tree`, message: '', files }
+    const stats = parseNumstat(await git($, ['diff', '--numstat', '-M', 'HEAD']).catch(() => ''))
+    const files = withStats(graph?.changes ?? [], stats)
+    return { hash, meta: `${summary(files)} in the working tree`, message: '', files }
   }
   const parent = graph?.commits.find(commit => commit.hash === hash)?.parents[0]
   try {
-    const [shown, names] = await Promise.all([
+    // A merge is shown against its first parent, as Git Graph does
+    const range = parent ? [parent, hash] : ['--root', hash]
+    const [shown, names, numstat] = await Promise.all([
       git($, ['show', '-s', '--format=%an <%ae> · %ad%n%B', '--date=format:%d %b %Y %H:%M', hash]),
-      // A merge is shown against its first parent, as Git Graph does
-      git($, ['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', ...(parent ? [parent, hash] : ['--root', hash])])
+      git($, ['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', ...range]),
+      git($, ['diff-tree', '-r', '-M', '--numstat', '--no-commit-id', ...range]).catch(() => '')
     ])
     const [meta = '', ...message] = shown.trimEnd().split('\n')
-    return { hash, meta, message: message.join('\n').trim(), files: parseNameStatus(names) }
+    const files = withStats(parseNameStatus(names), parseNumstat(numstat))
+    return { hash, meta: `${meta}  ·  ${summary(files)}`, message: message.join('\n').trim(), files }
   } catch (error) {
     return { hash, meta: `Could not read the commit: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
   }
@@ -265,9 +269,13 @@ async function readComparison ($: Engine, graph: Graph, base: string, hash: stri
   const [from, to] = order(base) > order(hash) ? [base, hash] : [hash, base]
   const label = (target: string) => (target === WORKTREE ? 'the working tree' : target.slice(0, HASH_WIDTH))
   try {
-    const names = await git($, ['diff', '--name-status', '-M', from, ...(to === WORKTREE ? [] : [to])])
-    const files = parseNameStatus(names)
-    return { hash, meta: `${files.length} ${files.length === 1 ? 'file' : 'files'} changed from ${label(from)} to ${label(to)}`, message: '', files, compare: { from, to } }
+    const range = [from, ...(to === WORKTREE ? [] : [to])]
+    const [names, numstat] = await Promise.all([
+      git($, ['diff', '--name-status', '-M', ...range]),
+      git($, ['diff', '--numstat', '-M', ...range]).catch(() => '')
+    ])
+    const files = withStats(parseNameStatus(names), parseNumstat(numstat))
+    return { hash, meta: `${summary(files)} from ${label(from)} to ${label(to)}`, message: '', files, compare: { from, to } }
   } catch (error) {
     return { hash, meta: `Could not compare them: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
   }
@@ -1099,6 +1107,9 @@ function drawFile (ui: Ui, $: Engine, hash: string, file: FileChange, diff: Diff
         <Text color={STATUS_COLOR[file.status] ?? 'white'}>{`${diff ? '▾' : '▸'} ${file.status === '?' ? 'U' : file.status} `}</Text>
         {file.oldPath ? <Text dimColor>{`${file.oldPath} → `}</Text> : ''}
         {file.path}
+        {file.isBinary ? <Text dimColor>{'  binary'}</Text> : ''}
+        {file.added !== undefined ? <Text color="green">{`  +${file.added}`}</Text> : ''}
+        {file.deleted !== undefined ? <Text color="red">{` −${file.deleted}`}</Text> : ''}
       </Button>
       {diff && (
         <Box key={`diff-${file.path}`} flexDirection="column" marginLeft={2} marginBottom={1}>
