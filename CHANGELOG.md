@@ -2,8 +2,10 @@
 
 Every version of Git Graph for Claude Code, newest first. Each release on GitHub carries its section as its notes.
 
-## Unreleased
+## 0.3.36 — 2026-10-20
 
+- **Added:** The directory listing's links in plugin.json (documentation, support, privacy policy, terms) and its display name
+- **Docs:** PRIVACY.md: what the plugin collects, which is nothing
 - **Chores:** Two comments in register.tsx no longer name passwords or signing tools, which the directory's scan read as a credential
 
 ## 0.3.35 — 2026-10-20
