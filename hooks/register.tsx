@@ -4,7 +4,8 @@
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
 // - Click a hash to open that commit under its row: its files and a row of actions.
 //   Click a file to read its diff right there.
-// - Actions that change the repo (checkout, cherry-pick) ask for a second click to confirm;
+// - Actions that change the repo (checkout, cherry-pick, revert, merge, rebase, reset) ask for
+//   a second click to confirm; a tag is named in a field under the commit;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
 // - The branch picker draws every branch, the current one, or any one branch alone.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
@@ -13,8 +14,8 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStatus, splitMatch, WORKTREE, worktreeRow } from './graph'
-import type { Commit, Detail, Diff, FileChange, Graph, Note, Pending, Ref } from '../types'
+import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStatus, parseTagInput, splitMatch, WORKTREE, worktreeRow } from './graph'
+import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, ResetMode } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -36,6 +37,7 @@ const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
 const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
+const TAGGING_REF = { plugin: 'git-graph', key: 'tagging' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
@@ -47,6 +49,7 @@ const COMPACT = atom(COMPACT_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
 const QUERY = atom(QUERY_REF, '')
+const TAGGING = atom(TAGGING_REF, null)
 
 // One color per lane, cycling, like Git Graph's palette
 const LANE_COLORS = ['blue', 'magenta', 'green', 'yellow', 'cyan', 'red']
@@ -196,6 +199,7 @@ async function clearSelection ($: Engine) {
   await $.state.set(DETAIL_REF, null)
   await $.state.set(DIFF_REF, null)
   await $.state.set(PENDING_REF, null)
+  await $.state.set(TAGGING_REF, null)
 }
 
 async function select ($: Engine, hash: string) {
@@ -203,6 +207,7 @@ async function select ($: Engine, hash: string) {
   await $.state.set(SELECTED_REF, hash)
   await $.state.set(PENDING_REF, null)
   await $.state.set(DIFF_REF, null)
+  await $.state.set(TAGGING_REF, null)
   await $.state.set(DETAIL_REF, { hash, meta: '', message: '', files: [], isLoading: true })
   const detail = await readDetail($, hash)
   if ((await read($, SELECTED)) === hash) await $.state.set(DETAIL_REF, detail)
@@ -308,53 +313,127 @@ function checkoutTarget (commit: Commit): { label: string; args: string[] } {
   return { label: `${commit.hash.slice(0, HASH_WIDTH)} (detached)`, args: ['switch', '--detach', commit.hash] }
 }
 
-async function copyHash ($: Engine, hash: string) {
+async function copyText ($: Engine, text: string, what: string) {
   const platform = (await $.process.run(['uname', '-s']).catch(() => undefined))?.stdout.trim()
   const argv = platform === 'Darwin'
     ? ['sh', '-c', 'printf %s "$GG_TEXT" | pbcopy']
     : platform === 'Linux'
       ? ['sh', '-c', 'printf %s "$GG_TEXT" | (wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null || xsel -b)']
       : ['cmd', '/c', 'echo|set /p="%GG_TEXT%"| clip']
-  const result = await $.process.run(argv, { env: { GG_TEXT: hash } }).catch(() => undefined)
-  if (result?.exitCode === 0) await note($, 'ok', `copied ${hash.slice(0, HASH_WIDTH)}`)
+  const result = await $.process.run(argv, { env: { GG_TEXT: text } }).catch(() => undefined)
+  if (result?.exitCode === 0) await note($, 'ok', `copied ${what}`)
   else await note($, 'error', 'could not reach the clipboard')
 }
 
+/** The words an action's confirming button asks with. */
+function confirmText (action: CommitAction, commit: Commit, branch: string): string {
+  const short = commit.hash.slice(0, HASH_WIDTH)
+  switch (action) {
+    case 'checkout': return `confirm: checkout ${checkoutTarget(commit).label}?`
+    case 'cherry-pick': return `confirm: cherry-pick onto ${branch}?`
+    case 'revert': return `confirm: revert ${short} on ${branch}?`
+    case 'merge': return `confirm: merge ${mergeTarget(commit)} into ${branch}?`
+    case 'rebase': return `confirm: rebase ${branch} onto ${short}?`
+    case 'reset': return `reset ${branch} to ${short}:`
+  }
+}
+
+/** What a merge names: the commit's branch when it has one, so the message reads well. */
+function mergeTarget (commit: Commit): string {
+  return commit.refs.find(ref => ref.kind === 'local' || ref.kind === 'remote')?.name ?? commit.hash.slice(0, HASH_WIDTH)
+}
+
 /** First click arms the action, the second one runs it. */
-async function arm ($: Engine, action: Pending['action'], hash: string) {
+async function arm ($: Engine, action: CommitAction, hash: string) {
   const pending = await read($, PENDING)
   if (!pending || pending.action !== action || pending.hash !== hash) {
     await $.state.set(PENDING_REF, { action, hash })
     return
   }
   await $.state.set(PENDING_REF, null)
+  // A reset runs from the mode picked under it, not from a second click on it
+  if (action !== 'reset') await run($, action, hash)
+}
+
+async function run ($: Engine, action: CommitAction, hash: string, mode: ResetMode = 'mixed') {
+  await $.state.set(PENDING_REF, null)
   if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
 
   const graph = await read($, GRAPH)
   const commit = graph?.commits.find(item => item.hash === hash)
-  if (!commit) return
+  if (!graph || !commit) return
+  const short = hash.slice(0, HASH_WIDTH)
 
-  const dirty = (await git($, ['status', '--porcelain']).catch(() => '')).trim()
-  if (dirty) return note($, 'error', 'uncommitted changes: commit or stash them first')
+  // A soft or mixed reset keeps the working tree as it is; everything else wants it clean
+  if (!(action === 'reset' && mode !== 'hard')) {
+    const dirty = (await git($, ['status', '--porcelain']).catch(() => '')).trim()
+    if (dirty) return note($, 'error', 'uncommitted changes: commit or stash them first')
+  }
 
   try {
-    if (action === 'checkout') {
-      const target = checkoutTarget(commit)
-      await git($, target.args)
-      await note($, 'ok', `checked out ${target.label}`)
-    } else {
-      try {
-        await git($, ['cherry-pick', hash])
-        await note($, 'ok', `cherry-picked ${hash.slice(0, HASH_WIDTH)} onto ${graph?.branch}`)
-      } catch (error) {
-        await git($, ['cherry-pick', '--abort']).catch(() => '')
-        throw error
+    switch (action) {
+      case 'checkout': {
+        const target = checkoutTarget(commit)
+        await git($, target.args)
+        await note($, 'ok', `checked out ${target.label}`)
+        break
       }
+      case 'cherry-pick':
+        await undoOnConflict($, ['cherry-pick', hash], ['cherry-pick', '--abort'])
+        await note($, 'ok', `cherry-picked ${short} onto ${graph.branch}`)
+        break
+      case 'revert':
+        // A merge is reverted against its first parent, the side it was merged into
+        await undoOnConflict($, ['revert', '--no-edit', ...(commit.parents.length > 1 ? ['-m', '1'] : []), hash], ['revert', '--abort'])
+        await note($, 'ok', `reverted ${short} on ${graph.branch}`)
+        break
+      case 'merge':
+        await undoOnConflict($, ['merge', '--no-edit', mergeTarget(commit)], ['merge', '--abort'])
+        await note($, 'ok', `merged ${mergeTarget(commit)} into ${graph.branch}`)
+        break
+      case 'rebase':
+        await undoOnConflict($, ['rebase', hash], ['rebase', '--abort'])
+        await note($, 'ok', `rebased ${graph.branch} onto ${short}`)
+        break
+      case 'reset':
+        await git($, ['reset', `--${mode}`, hash])
+        await note($, 'ok', `reset ${graph.branch} to ${short} (${mode})`)
+        break
     }
   } catch (error) {
     await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
   }
   await reload($)
+}
+
+/** Runs an action that can stop on a conflict; a conflict is undone, leaving the repo as it was. */
+async function undoOnConflict ($: Engine, args: string[], abort: string[]) {
+  try {
+    await git($, args)
+  } catch (error) {
+    await git($, abort).catch(() => '')
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(/conflict/i.test(message) ? `${args[0]} stopped on a conflict and was undone: ask Claude to ${args[0]} and resolve it` : message)
+  }
+}
+
+async function toggleTagging ($: Engine, hash: string) {
+  await $.state.set(TAGGING_REF, (await read($, TAGGING)) === hash ? null : hash)
+}
+
+/** `name` makes a lightweight tag, `name: message` an annotated one. */
+async function tag ($: Engine, hash: string, value: string) {
+  const { name, message } = parseTagInput(value)
+  if (name === '') return
+  try {
+    await git($, ['check-ref-format', `refs/tags/${name}`]).catch(() => { throw new Error(`“${name}” is not a valid tag name`) })
+    await git($, ['tag', ...(message ? ['-a', name, '-m', message] : [name]), hash])
+    await $.state.set(TAGGING_REF, null)
+    await note($, 'ok', `tagged ${hash.slice(0, HASH_WIDTH)} as ${name}`)
+    await reload($)
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
 }
 
 /** Writing the message is Claude's job: it proposes one and asks before committing. */
@@ -396,6 +475,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const filter = await read($, FILTER)
   const compact = await read($, COMPACT)
   const pending = await read($, PENDING)
+  const tagging = await read($, TAGGING)
   const lastNote = await read($, NOTE)
   const shown = await read($, SHOWN)
   const columns = Math.max(40, e.props.bodyColumns)
@@ -469,7 +549,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   for (const commit of visible) {
     const isSelected = commit.hash === selected
     rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query }))
-    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, graph, graphWidth))
+    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, tagging === commit.hash, graph, graphWidth))
   }
 
   return (
@@ -559,39 +639,68 @@ function drawRow (
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
   ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
-  pending: Pending | null, graph: Graph, graphWidth: number
+  pending: Pending | null, isTagging: boolean, graph: Graph, graphWidth: number
 ) {
-  const { Box, Button, Text } = ui
-  const armed = (action: Pending['action']) => pending?.action === action && pending.hash === commit.hash
-  const target = checkoutTarget(commit)
-  const isHead = commit.refs.some(ref => ref.kind === 'head')
+  const { Box, Text } = ui
   const isWorktree = commit.kind === 'worktree'
 
   return (
     <Box key={`detail-${commit.hash}`} flexDirection="column" marginLeft={graphWidth} marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.hash}</Text>
-      {isWorktree
-        ? (
-          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-            <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
-          </Box>
-          )
-        : (
-          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-            <Button key="copy" label="⧉ copy hash" plain onPress={() => copyHash($, commit.hash)} />
-            {!isHead && (
-              <Button key="checkout" label={armed('checkout') ? `confirm: checkout ${target.label}?` : '⎇ checkout'} plain dimColor={!armed('checkout')} onPress={() => arm($, 'checkout', commit.hash)} />
-            )}
-            <Button key="branch" label="+ new branch here" plain dimColor onPress={() => newBranch($, commit)} />
-            {!isHead && commit.parents.length === 1 && (
-              <Button key="pick" label={armed('cherry-pick') ? `confirm: cherry-pick onto ${graph.branch}?` : '⇣ cherry-pick'} plain dimColor={!armed('cherry-pick')} onPress={() => arm($, 'cherry-pick', commit.hash)} />
-            )}
-          </Box>
-          )}
+      {isWorktree ? drawWorktreeActions(ui, $) : drawCommitActions(ui, $, commit, pending, isTagging, graph)}
       <Text> </Text>
       {!detail || detail.isLoading
         ? <Text dimColor>Loading…</Text>
         : drawDetailBody(ui, $, detail, diff)}
+    </Box>
+  )
+}
+
+function drawWorktreeActions (ui: Ui, $: Engine) {
+  const { Box, Button } = ui
+  return (
+    <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+      <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
+    </Box>
+  )
+}
+
+function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending | null, isTagging: boolean, graph: Graph) {
+  const { Box, Button, Input, Text } = ui
+  const isHead = commit.refs.some(ref => ref.kind === 'head')
+  const armed = (action: CommitAction) => pending?.action === action && pending.hash === commit.hash
+  /** A button that asks for a second click before it changes the repo. */
+  const guarded = (action: CommitAction, label: string) => (
+    <Button key={action} label={armed(action) ? confirmText(action, commit, graph.branch) : label} plain dimColor={!armed(action)} onPress={() => arm($, action, commit.hash)} />
+  )
+  const actions = [
+    <Button key="copy" label="⧉ copy hash" plain onPress={() => copyText($, commit.hash, commit.hash.slice(0, HASH_WIDTH))} />,
+    <Button key="copy-subject" label="⧉ copy subject" plain dimColor onPress={() => copyText($, commit.subject, 'the subject')} />,
+    !isHead && guarded('checkout', '⎇ checkout'),
+    <Button key="branch" label="+ new branch here" plain dimColor onPress={() => newBranch($, commit)} />,
+    <Button key="tag" label="◆ tag…" plain dimColor onPress={() => toggleTagging($, commit.hash)} />,
+    !isHead && commit.parents.length === 1 && guarded('cherry-pick', '⇣ cherry-pick'),
+    guarded('revert', '↶ revert'),
+    !isHead && guarded('merge', '⤞ merge into current'),
+    !isHead && guarded('rebase', '⇡ rebase current onto this'),
+    !isHead && guarded('reset', '↺ reset current to this')
+  ].filter(Boolean)
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
+      {armed('reset') && (
+        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+          <Text color="yellow">{confirmText('reset', commit, graph.branch)}</Text>
+          <Button key="reset-soft" label="soft: keep changes staged" plain onPress={() => run($, 'reset', commit.hash, 'soft')} />
+          <Button key="reset-mixed" label="mixed: keep changes unstaged" plain onPress={() => run($, 'reset', commit.hash, 'mixed')} />
+          <Button key="reset-hard" label="hard: discard changes" plain onPress={() => run($, 'reset', commit.hash, 'hard')} />
+          <Button key="reset-cancel" label="cancel" plain dimColor onPress={() => $.state.set(PENDING_REF, null)} />
+        </Box>
+      )}
+      {isTagging && Input && (
+        <Input key="tag-name" label="◆ " placeholder="v1.2  or  v1.2: message for an annotated tag" submitLabel="tag" autoFocus onSubmit={(value: string) => tag($, commit.hash, value)} />
+      )}
     </Box>
   )
 }

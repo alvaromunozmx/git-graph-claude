@@ -40,6 +40,14 @@ export function parseBranches (stdout: string): string[] {
   return [...local, ...remote]
 }
 
+/** `v1.2` or `v1.2: the message`: a tag's name, and a message when it is annotated. */
+export function parseTagInput (value: string): { name: string; message?: string } {
+  const colon = value.indexOf(':')
+  if (colon === -1) return { name: value.trim() }
+  const message = value.slice(colon + 1).trim()
+  return message === '' ? { name: value.slice(0, colon).trim() } : { name: value.slice(0, colon).trim(), message }
+}
+
 /** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */
 export const DIFF_LIMIT = 60000
 

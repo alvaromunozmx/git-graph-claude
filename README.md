@@ -23,12 +23,17 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
 - **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
-  - **copy hash** to the clipboard.
+  - **copy hash** and **copy subject** to the clipboard.
   - **checkout**: its local branch; or a new local branch tracking its remote one; or a detached HEAD.
   - **new branch here**: asks Claude, who asks you for the name and applies its own permissions.
-  - **cherry-pick** onto the current branch. On a conflict it aborts and leaves everything as it was.
+  - **tag…**: opens a field under the commit. `v1.2` makes a lightweight tag, `v1.2: message` an annotated one.
+  - **cherry-pick** onto the current branch.
+  - **revert**: a new commit that undoes it (a merge against its first parent).
+  - **merge into current**: merges its branch, or the commit itself, into the current branch.
+  - **rebase current onto this**.
+  - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
-Checkout and cherry-pick need a second click to confirm, wait for Claude to finish its turn, and refuse to run with uncommitted changes.
+Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
 ## Settings
 

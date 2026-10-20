@@ -35,8 +35,14 @@ export type Detail = { hash: string; meta: string; message: string; files: FileC
 /** One file's diff, opened under it in the commit's detail: unified-diff hunks, or why there are none. */
 export type Diff = { hash: string; path: string; hunks: string; note?: string; isLoading?: boolean } | null
 
+/** An action on a commit that changes the repo: it waits for a confirming click. */
+export type CommitAction = 'checkout' | 'cherry-pick' | 'revert' | 'merge' | 'rebase' | 'reset'
+
+/** How far `reset` goes: the branch only, also the index, or also the working tree. */
+export type ResetMode = 'soft' | 'mixed' | 'hard'
+
 /** An action waiting for its confirming click. */
-export type Pending = { action: 'checkout' | 'cherry-pick'; hash: string }
+export type Pending = { action: CommitAction; hash: string }
 
 export type Note = { kind: 'ok' | 'error' | 'info'; text: string }
 
@@ -54,6 +60,8 @@ declare module 'claude-code' {
       compact: boolean
       pending: Pending | null
       note: Note | null
+      /** The commit whose tag field is open */
+      tagging: string | null
       /** What the find field holds: rows that match it are the only ones drawn */
       query: string
     }
