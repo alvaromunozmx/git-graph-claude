@@ -17,7 +17,7 @@ const LOG = [
 
 /** What the fake repo answers, by git subcommand: stdout, or a failure. */
 type Answer = string | { exitCode: number; stdout?: string; stderr?: string }
-type Repo = Record<string, Answer | ((args: string[]) => Answer)>
+type Repo = Record<string, Answer | ((args: string[], cwd: string) => Answer)>
 
 const REPO: Repo = {
   remote: 'origin\n',
@@ -68,7 +68,7 @@ function world (on: On, repo: Repo = {}) {
     seen.cwds.push(cwd)
     seen.git.push([command, ...args])
     const found = answers[command] ?? ''
-    const answer = typeof found === 'function' ? found(args) : found
+    const answer = typeof found === 'function' ? found(args, cwd) : found
     const result = typeof answer === 'string' ? { exitCode: 0, stdout: answer, stderr: '' } : { stdout: '', stderr: '', ...answer }
     return { value: { ...result, isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -105,7 +105,7 @@ test('/git-graph current loads only the current branch', async ($, on) => {
 test('/git-graph with an unknown argument answers with its usage', async ($, on) => {
   const seen = world(on)
   const result = await $.command.run(typed('nope'))
-  expect(result).toEqual({ text: 'Usage: /git-graph [all | current]' })
+  expect(result).toEqual({ text: 'Usage: /git-graph [all | current | <repo>]' })
   expect(seen.opened).toEqual([])
 })
 
@@ -650,6 +650,100 @@ test('a repo with no submodule has no repo picker', async ($, on) => {
   await $.command.run(typed(''))
   const ui = await mount($, 'desktop')
   expect(await ui.find({ key: 'repo' })).toBeUndefined()
+})
+
+/**
+ * The session's folder is no repo but holds some, one level down: `api` (with a submodule) and
+ * `web` are repos, `docs` is a plain folder and `.claude` a hidden one.
+ */
+function folderOfRepos (on: On, repos: string[] = ['api', 'web'], kept: Record<string, unknown> = {}) {
+  // The plugin's store, as the last session left it
+  on('store.get', ($, e) => ({ value: kept[e.key] }))
+  on('store.set', ($, e) => {
+    kept[e.key] = e.value
+    return { value: undefined }
+  })
+  const seen = world(on, {
+    'rev-parse': (args, cwd) => (args[0] === '--show-toplevel'
+      ? (cwd === CWD ? { exitCode: 128, stderr: 'fatal: not a git repository (or any of the parent directories): .git' } : `${cwd}\n`)
+      : 'b2\n'),
+    submodule: (args, cwd) => (cwd === `${CWD}/api` ? ' 1a2b lib/core (heads/main)\n' : '')
+  })
+  on('fs.list', ($, e) => {
+    expect(e.path).toBe(CWD)
+    const entries = [...repos, 'docs', '.claude'].map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false }))
+    return { value: [...entries, { name: 'README.md', kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false }] }
+  })
+  on('fs.exists', ($, e) => ({ value: repos.some(name => e.path === `${CWD}/${name}/.git`) }))
+  return seen
+}
+
+test('a folder of repos lists them and asks for one before drawing any', async ($, on) => {
+  const seen = folderOfRepos(on)
+  await $.command.run(typed(''))
+  expect(seen.git.some(args => args[0] === 'log')).toBe(false)
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: 'This folder holds 3 repos. Pick one to draw its history:' })).toBeDefined()
+    expect(await ui.find({ key: `pick-${CWD}/web` })).toBeDefined()
+    expect(await ui.find({ key: `pick-${CWD}/docs` })).toBeUndefined()
+    const picker = await ui.find({ key: 'repo' })
+    expect(picker?.props.options).toEqual([
+      { value: `${CWD}/api`, label: 'api' },
+      { value: `${CWD}/api/lib/core`, label: 'api/lib/core' },
+      { value: `${CWD}/web`, label: 'web' }
+    ])
+    expect(picker?.props.value).toBeUndefined()
+  }
+})
+
+test('picking a repo in a folder of repos draws it, and the picker switches to another', async ($, on) => {
+  const kept: Record<string, unknown> = {}
+  const seen = folderOfRepos(on, ['api', 'web'], kept)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: `pick-${CWD}/web` })
+  expect(seen.cwds.at(-1)).toBe(`${CWD}/web`)
+  expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
+  expect((await ui.find({ key: 'repo' }))?.props.value).toBe(`${CWD}/web`)
+  await ui.select({ key: 'repo', value: `${CWD}/api` })
+  expect(seen.cwds.at(-1)).toBe(`${CWD}/api`)
+  expect((await ui.find({ key: 'repo' }))?.props.value).toBe(`${CWD}/api`)
+  expect(kept.repos).toEqual({ [CWD]: `${CWD}/api` })
+})
+
+test('a folder of repos draws the one picked there last', async ($, on) => {
+  const seen = folderOfRepos(on, ['api', 'web'], { repos: { [CWD]: `${CWD}/web`, '/elsewhere': '/elsewhere/x' } })
+  await $.command.run(typed(''))
+  expect(seen.cwds.filter(cwd => cwd !== CWD).every(cwd => cwd.startsWith(`${CWD}/`))).toBe(true)
+  expect(seen.git.some(args => args[0] === 'log')).toBe(true)
+  const ui = await mount($, 'terminal')
+  expect((await ui.find({ key: 'repo' }))?.props.value).toBe(`${CWD}/web`)
+  expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
+})
+
+test('/git-graph <repo> draws that repo, and an unknown name lists the ones there', async ($, on) => {
+  const seen = folderOfRepos(on)
+  expect(await $.command.run(typed('WEB'))).toEqual({})
+  expect(seen.cwds.at(-1)).toBe(`${CWD}/web`)
+  expect(seen.opened).toEqual(['git-graph'])
+  expect(await $.command.run(typed('mobile'))).toEqual({ text: 'No repo named “mobile” here. Repos: api, api/lib/core, web' })
+})
+
+test('a folder with one repo draws it, and one with none says so', async ($, on) => {
+  const seen = folderOfRepos(on, ['web'])
+  await $.command.run(typed(''))
+  expect(seen.cwds.at(-1)).toBe(`${CWD}/web`)
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
+  expect(await ui.find({ key: 'repo' })).toBeUndefined()
+})
+
+test('a folder holding no repo says that none of its folders is one', async ($, on) => {
+  folderOfRepos(on, [])
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: 'This folder is not a git repository, and none of its folders is one.' })).toBeDefined()
 })
 
 test('the settings hide the author or date column and change the date format', async ($, on) => {
