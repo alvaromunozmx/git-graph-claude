@@ -403,14 +403,15 @@ export const CURVE_CELL = { width: 7, height: 19 }
 export function curvesOf (cells: Cell[]): string {
   const { width: w, height: h } = CURVE_CELL
   const mid = h / 2
-  const parts: string[] = []
+  // One path per color, its segments joined: every row's SVG goes to the surface on each redraw
+  const strokes = new Map<string, string>()
   const nodes: string[] = []
   cells.forEach((cell, i) => {
-    const color = CURVE_COLORS[cell.lane % CURVE_COLORS.length]
+    const color = CURVE_COLORS[cell.lane % CURVE_COLORS.length] ?? CURVE_COLORS[0]
     const x = i * w + w / 2
     const left = i * w
     const right = left + w
-    const line = (d: string, stroke = color) => parts.push(`<path d="${d}" stroke="${stroke}" stroke-width="2" fill="none" stroke-linecap="round"/>`)
+    const line = (d: string, stroke = color) => strokes.set(stroke ?? '', (strokes.get(stroke ?? '') ?? '') + d)
     // A line passing through goes under what the cell draws, in its own lane's color
     if (cell.across !== undefined) line(`M${left} ${mid}H${right}`, CURVE_COLORS[cell.across % CURVE_COLORS.length])
     switch (cell.ch) {
@@ -431,8 +432,13 @@ export function curvesOf (cells: Cell[]): string {
         break
     }
   })
-  const width = Math.max(1, cells.length) * w
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">${parts.join('')}${nodes.join('')}</svg>`
+  return svgOf(Math.max(1, cells.length) * w, h, strokes, nodes.join(''))
+}
+
+/** An SVG of one stroked path per color, under whatever else it holds. */
+function svgOf (width: number, height: number, strokes: Map<string, string>, over: string): string {
+  const paths = [...strokes].map(([stroke, d]) => `<path stroke="${stroke}" d="${d}"/>`).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><g fill="none" stroke-width="2" stroke-linecap="round">${paths}</g>${over}</svg>`
 }
 
 /** `Alvaro Muñoz` → `AM`; one name gives its first two letters. */
@@ -456,7 +462,7 @@ export function avatarOf (name: string, size = 16): string {
   const color = CURVE_COLORS[colorIndexOf(name, CURVE_COLORS.length)]
   const text = initialsOf(name).replace(/[<>&"]/g, '')
   const r = size / 2
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/><text x="${r}" y="${r}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="${size * 0.45}" font-weight="600" fill="#fff">${text}</text></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/><text x="${r}" y="${r}" dy=".35em" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.45}" font-weight="600" fill="#fff">${text}</text></svg>`
 }
 
 /** Whether a cell's lane goes on below its row: a lane, a crossing, a fork, or a commit with a parent. */
@@ -471,11 +477,13 @@ export function goesDown (cell: Cell): boolean {
  */
 export function linesDownOf (cells: Cell[], rows: number): string {
   const { width: w, height: h } = CURVE_CELL
-  const lines = cells.map((cell, i) => (goesDown(cell)
-    ? `<path d="M${i * w + w / 2} 0V${rows * h}" stroke="${CURVE_COLORS[cell.lane % CURVE_COLORS.length]}" stroke-width="2"/>`
-    : '')).join('')
-  const width = Math.max(1, cells.length) * w
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${rows * h}" viewBox="0 0 ${width} ${rows * h}">${lines}</svg>`
+  const strokes = new Map<string, string>()
+  cells.forEach((cell, i) => {
+    if (!goesDown(cell)) return
+    const stroke = CURVE_COLORS[cell.lane % CURVE_COLORS.length] ?? ''
+    strokes.set(stroke, `${strokes.get(stroke) ?? ''}M${i * w + w / 2} 0V${rows * h}`)
+  })
+  return svgOf(Math.max(1, cells.length) * w, rows * h, strokes, '')
 }
 
 /** A join or fork that a line passes through draws as a tee: `╮` becomes `┬`, `╯` becomes `┴`. */

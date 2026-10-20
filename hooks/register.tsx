@@ -36,7 +36,8 @@ type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }
 type Ui = any
 
 const PANE = 'git-graph'
-// Rows drawn at once; "show more" adds another page
+// Rows drawn at once: older and newer pages replace them. Every row goes to the surface on each
+// redraw, so the page keeps that bounded however long the history is
 const PAGE = 40
 
 const GRAPH_REF = { plugin: 'git-graph', key: 'graph' } as const
@@ -47,7 +48,7 @@ const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
 const REPO_REF = { plugin: 'git-graph', key: 'repo' } as const
 const PICKER_REDRAW_REF = { plugin: 'git-graph', key: 'pickerRedraw' } as const
-const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
+const PAGE_START_REF = { plugin: 'git-graph', key: 'pageStart' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
 const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
@@ -73,7 +74,7 @@ const ALL = atom(ALL_REF, true)
 const FILTER = atom(FILTER_REF, null)
 const REPO = atom(REPO_REF, null)
 const PICKER_REDRAW = atom(PICKER_REDRAW_REF, 0)
-const SHOWN = atom(SHOWN_REF, PAGE)
+const PAGE_START = atom(PAGE_START_REF, 0)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
@@ -176,7 +177,7 @@ export const register: Register = (on, options) => {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     isOpen = false
     await clearSelection($)
-    await $.state.set(SHOWN_REF, PAGE)
+    await $.state.set(PAGE_START_REF, 0)
     await $.state.set(NOTE_REF, null)
     await $.state.set(QUERY_REF, '')
     await $.state.set(REF_REF, null)
@@ -379,7 +380,8 @@ async function step ($: Engine, by: 1 | -1) {
   if (rows.length === 0) return
   const selected = await read($, SELECTED)
   const at = rows.findIndex(commit => commit.hash === selected)
-  const next = at === -1 ? (by === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by))
+  // With nothing open, either key starts at the top of the page drawn
+  const next = at === -1 ? Math.min(rows.length - 1, await read($, PAGE_START)) : Math.min(rows.length - 1, Math.max(0, at + by))
   await reveal($, next)
   const target = rows[next]
   if (target && target.hash !== selected) await openCommit($, target.hash)
@@ -395,10 +397,10 @@ async function goHead ($: Engine) {
   if (target && target.hash !== (await read($, SELECTED))) await openCommit($, target.hash)
 }
 
-/** Shows pages until the row at `index` is drawn. */
+/** Turns to the page that draws the row at `index`. */
 async function reveal ($: Engine, index: number) {
-  const shown = await read($, SHOWN)
-  if (index >= shown) await $.state.set(SHOWN_REF, (Math.floor(index / PAGE) + 1) * PAGE)
+  const start = Math.floor(index / PAGE) * PAGE
+  if (start !== (await read($, PAGE_START))) await $.state.set(PAGE_START_REF, start)
 }
 
 /** s: the focus goes to the find field. */
@@ -465,7 +467,7 @@ async function pickRepo ($: Engine, path: string) {
   await $.state.set(FILTER_REF, null)
   await $.state.set(COMPARE_REF, null)
   await $.state.set(REF_REF, null)
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
   await clearSelection($)
   await reload($)
 }
@@ -480,14 +482,14 @@ async function pickBranches ($: Engine, value: string) {
   } else {
     await $.state.set(FILTER_REF, value.slice(4))
   }
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
   await reload($)
 }
 
 async function find ($: Engine, value: string) {
   // Kept as typed: the field is drawn from it, and a trimmed space would vanish while typing
   await $.state.set(QUERY_REF, value)
-  await $.state.set(SHOWN_REF, PAGE)
+  await $.state.set(PAGE_START_REF, 0)
 }
 
 async function toggleCompact ($: Engine) {
@@ -997,7 +999,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const openRef = await read($, REF)
   const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
-  const shown = await read($, SHOWN)
+  const pageStart = await read($, PAGE_START)
   const columns = Math.max(40, e.props.bodyColumns)
   const count = graph?.commits.filter(commit => !commit.kind).length ?? 0
   const typed = await read($, QUERY)
@@ -1085,7 +1087,10 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 
   if (query !== '' && found.length === 0) return <Box flexDirection="column">{header}<Text> </Text><Text dimColor>{`No commit in the last ${count} matches “${query}”.`}</Text></Box>
 
-  const visible = found.slice(0, shown)
+  // The page drawn, kept inside the rows found when they shrink under it
+  const start = Math.min(pageStart, Math.max(0, Math.floor((found.length - 1) / PAGE) * PAGE))
+  const visible = found.slice(start, start + PAGE)
+  const end = start + visible.length
   // Compact drops the gap after every lane: half as wide, the junction glyphs still connect
   const cellsOf = (commit: Commit) => {
     // Found commits are not neighbours: their lanes would not connect, so each keeps its dot alone
@@ -1122,9 +1127,13 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     <Box flexDirection="column">
       {header}
       <Text> </Text>
+      {start > 0 && <Button key="newer" label={`▴ newer ${Math.min(PAGE, start)}`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, Math.max(0, start - PAGE))} />}
       {rows}
-      {found.length > shown && (
-        <Button key="more" label={`show ${Math.min(PAGE, found.length - shown)} more`} plain dimColor onPress={() => $.state.set(SHOWN_REF, shown + PAGE)} />
+      {found.length > PAGE && (
+        <Box key="pages" flexDirection="row" columnGap={2}>
+          {end < found.length && <Button key="older" label={`older ${Math.min(PAGE, found.length - end)} ▾`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, end)} />}
+          <Text dimColor>{`${start + 1}–${end} of ${found.length}`}</Text>
+        </Box>
       )}
       <Text> </Text>
       <Box key="keys" flexDirection="row" columnGap={2} flexWrap="wrap">
@@ -1276,22 +1285,19 @@ function drawDetail (
   ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
   pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean; compareBase: string | null }, graph: Graph
 ) {
-  const { Box, Button, Text } = ui
+  const { Box, Text } = ui
   const isBase = fields.compareBase === commit.hash
-  const compareButton = (
-    <Button key="compare" label={isBase ? '⇄ marked: open another commit · press to unmark' : fields.compareBase ? '⇄ compare with this instead' : '⇄ compare…'} plain dimColor={!isBase} onPress={() => toggleCompare($, commit.hash)} />
-  )
+  const compare = action(ui, 'compare', isBase ? '⇄ Unmark' : fields.compareBase ? '⇄ Compare with this' : '⇄ Compare', () => toggleCompare($, commit.hash), isBase)
   const isWorktree = commit.kind === 'worktree'
+  const panel = isWorktree
+    ? drawWorktreeActions(ui, $, fields.isStashing, compare)
+    : commit.kind === 'stash'
+      ? drawStashActions(ui, $, commit, pending, fields.isStashing, compare)
+      : drawCommitActions(ui, $, commit, pending, fields.isTagging, graph, compare)
 
   return (
     <Box key={`detail-${commit.hash}`} flexDirection="column" marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.stash ? `${commit.stash}  ${commit.hash}` : commit.hash}</Text>
-      {compareButton}
-      {isWorktree
-        ? drawWorktreeActions(ui, $, fields.isStashing)
-        : commit.kind === 'stash'
-          ? drawStashActions(ui, $, commit, pending, fields.isStashing)
-          : drawCommitActions(ui, $, commit, pending, fields.isTagging, graph)}
+      {panel}
       <Text> </Text>
       {!detail || detail.isLoading
         ? <Text dimColor>Loading…</Text>
@@ -1300,14 +1306,54 @@ function drawDetail (
   )
 }
 
-function drawWorktreeActions (ui: Ui, $: Engine, isStashing: boolean) {
-  const { Box, Button, Input } = ui
+/** A panel's first line: its title on the left, quick links (copy, the web page) on the right. */
+function drawPanelTitle (ui: Ui, title: string, subtitle: string, color: string, quick: unknown[]) {
+  const { Box, Text } = ui
+  return (
+    <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
+      <Box flexShrink={1}>
+        <Text wrap="truncate-end"><Text color={color} bold>{title}</Text><Text dimColor>{subtitle ? `  ${subtitle}` : ''}</Text></Text>
+      </Box>
+      <Box flexDirection="row" columnGap={2} flexShrink={0}>{quick.filter(Boolean)}</Box>
+    </Box>
+  )
+}
+
+/**
+ * A row of action buttons in groups, a dim bar between groups: what looks around, what changes
+ * the current branch, what deletes. Native buttons on desktop, bracketed in the terminal.
+ */
+function drawToolbar (ui: Ui, groups: unknown[][]) {
+  const { Box, Text } = ui
+  const shown = groups.map(group => group.filter(Boolean)).filter(group => group.length > 0)
+  return (
+    <Box flexDirection="row" columnGap={1} flexWrap="wrap" alignItems="center" marginTop={1}>
+      {shown.flatMap((group, i) => [...(i > 0 ? [<Text key={`bar-${i}`} dimColor>│</Text>] : []), ...group])}
+    </Box>
+  )
+}
+
+/** One action button; while it waits for its confirming press it is the primary one, saying what it will do. */
+function action (ui: Ui, key: string, label: string, onPress: () => unknown, isArmed = false) {
+  const { Button } = ui
+  return <Button key={key} label={label} variant={isArmed ? 'primary' : undefined} onPress={onPress} />
+}
+
+/** A small link-like button for the panel's title line. */
+function quickButton (ui: Ui, key: string, label: string, onPress: () => unknown) {
+  const { Button } = ui
+  return <Button key={key} label={label} plain dimColor onPress={onPress} />
+}
+
+function drawWorktreeActions (ui: Ui, $: Engine, isStashing: boolean, compare: unknown) {
+  const { Box, Input } = ui
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="commit" label="✎ commit…" plain onPress={() => commitChanges($)} />
-        {Input && <Button key="stash" label="⊟ stash…" plain dimColor onPress={() => toggleStashing($, WORKTREE)} />}
-      </Box>
+      {drawPanelTitle(ui, 'Uncommitted Changes', 'in the working tree', 'yellow', [])}
+      {drawToolbar(ui, [
+        [action(ui, 'commit', '✎ Commit…', () => commitChanges($)), Input && action(ui, 'stash', '⊟ Stash…', () => toggleStashing($, WORKTREE), isStashing)],
+        [compare]
+      ])}
       {isStashing && Input && (
         <Input key="stash-message" label="⊟ " placeholder="a message for the stash, or none" submitLabel="stash" autoFocus onSubmit={(value: string) => stashChanges($, value)} />
       )}
@@ -1315,17 +1361,23 @@ function drawWorktreeActions (ui: Ui, $: Engine, isStashing: boolean) {
   )
 }
 
-function drawStashActions (ui: Ui, $: Engine, stash: Commit, pending: Pending | null, isBranching: boolean) {
-  const { Box, Button, Input } = ui
-  const armed = (action: StashAction) => pending?.action === action && pending.hash === stash.hash
+function drawStashActions (ui: Ui, $: Engine, stash: Commit, pending: Pending | null, isBranching: boolean, compare: unknown) {
+  const { Box, Input } = ui
+  const armed = (item: StashAction) => pending?.action === item && pending.hash === stash.hash
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="stash-apply" label="⇣ apply" plain onPress={() => stashAction($, 'stash-apply', stash)} />
-        <Button key="stash-pop" label={armed('stash-pop') ? `confirm: apply and drop ${stash.stash}?` : '⇣ pop'} plain dimColor={!armed('stash-pop')} onPress={() => stashAction($, 'stash-pop', stash)} />
-        {Input && <Button key="stash-branch" label="+ branch…" plain dimColor onPress={() => toggleStashing($, stash.hash)} />}
-        <Button key="stash-drop" label={armed('stash-drop') ? `confirm: drop ${stash.stash}?` : '✕ drop'} plain dimColor={!armed('stash-drop')} onPress={() => stashAction($, 'stash-drop', stash)} />
-      </Box>
+      {drawPanelTitle(ui, stash.stash ?? 'stash', stash.hash.slice(0, HASH_WIDTH), 'cyan', [
+        quickButton(ui, 'copy', '⧉ hash', () => copyText($, stash.hash, stash.hash.slice(0, HASH_WIDTH)))
+      ])}
+      {drawToolbar(ui, [
+        [
+          action(ui, 'stash-apply', '⇣ Apply', () => stashAction($, 'stash-apply', stash)),
+          action(ui, 'stash-pop', armed('stash-pop') ? `Apply and drop ${stash.stash}?` : '⇣ Pop', () => stashAction($, 'stash-pop', stash), armed('stash-pop')),
+          Input && action(ui, 'stash-branch', '+ Branch…', () => toggleStashing($, stash.hash), isBranching)
+        ],
+        [compare],
+        [action(ui, 'stash-drop', armed('stash-drop') ? `confirm: drop ${stash.stash}?` : '✕ Drop', () => stashAction($, 'stash-drop', stash), armed('stash-drop'))]
+      ])}
       {isBranching && Input && (
         <Input key="stash-branch-name" label="+ " placeholder="a name for the new branch" submitLabel="branch" autoFocus onSubmit={(value: string) => branchFromStash($, stash, value)} />
       )}
@@ -1333,40 +1385,43 @@ function drawStashActions (ui: Ui, $: Engine, stash: Commit, pending: Pending | 
   )
 }
 
-function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending | null, isTagging: boolean, graph: Graph) {
-  const { Box, Button, Input, Text } = ui
+function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending | null, isTagging: boolean, graph: Graph, compare: unknown) {
+  const { Box, Input, Link, Text } = ui
   const isHead = commit.refs.some(ref => ref.kind === 'head')
-  const armed = (action: CommitAction) => pending?.action === action && pending.hash === commit.hash
-  /** A button that asks for a second click before it changes the repo. */
-  const guarded = (action: CommitAction, label: string) => (
-    <Button key={action} label={armed(action) ? confirmText(action, commit, graph) : label} plain dimColor={!armed(action)} onPress={() => arm($, action, commit.hash)} />
-  )
-  const { Link } = ui
+  const armed = (item: CommitAction) => pending?.action === item && pending.hash === commit.hash
+  /** A button that asks for a second press before it changes the repo. */
+  const guarded = (item: CommitAction, label: string) => action(ui, item, armed(item) ? confirmText(item, commit, graph) : label, () => arm($, item, commit.hash), armed(item))
   const page = commitUrl(graph.forge, commit.hash)
-  const actions = [
-    page && <Link key="web" href={page} label={`↗ ${graph.forge?.host}`} />,
-    <Button key="copy" label="⧉ copy hash" plain onPress={() => copyText($, commit.hash, commit.hash.slice(0, HASH_WIDTH))} />,
-    <Button key="copy-subject" label="⧉ copy subject" plain dimColor onPress={() => copyText($, commit.subject, 'the subject')} />,
-    !isHead && guarded('checkout', '⎇ checkout'),
-    <Button key="branch" label="+ new branch here" plain dimColor onPress={() => newBranch($, commit)} />,
-    <Button key="tag" label="◆ tag…" plain dimColor onPress={() => toggleTagging($, commit.hash)} />,
-    !isHead && commit.parents.length === 1 && guarded('cherry-pick', '⇣ cherry-pick'),
-    guarded('revert', '↶ revert'),
-    !isHead && guarded('merge', '⤞ merge into current'),
-    !isHead && guarded('rebase', '⇡ rebase current onto this'),
-    !isHead && guarded('reset', '↺ reset current to this')
-  ].filter(Boolean)
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
+      {drawPanelTitle(ui, `Commit ${commit.hash.slice(0, HASH_WIDTH)}`, isHead ? `HEAD · ${graph.branch}` : '', 'yellow', [
+        quickButton(ui, 'copy', '⧉ hash', () => copyText($, commit.hash, commit.hash.slice(0, HASH_WIDTH))),
+        quickButton(ui, 'copy-subject', '⧉ subject', () => copyText($, commit.subject, 'the subject')),
+        page && <Link key="web" href={page} label={`↗ ${graph.forge?.host}`} />
+      ])}
+      {drawToolbar(ui, [
+        [
+          !isHead && guarded('checkout', '⎇ Checkout'),
+          action(ui, 'branch', '+ Branch…', () => newBranch($, commit)),
+          action(ui, 'tag', '◆ Tag…', () => toggleTagging($, commit.hash), isTagging),
+          compare
+        ],
+        [
+          !isHead && commit.parents.length === 1 && guarded('cherry-pick', '⇣ Cherry-pick'),
+          guarded('revert', '↶ Revert'),
+          !isHead && guarded('merge', '⤞ Merge into current'),
+          !isHead && guarded('rebase', '⇡ Rebase current onto'),
+          !isHead && guarded('reset', '↺ Reset current to')
+        ]
+      ])}
       {armed('reset') && (
-        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Box flexDirection="row" columnGap={1} flexWrap="wrap" alignItems="center" marginTop={1}>
           <Text color="yellow">{confirmText('reset', commit, graph)}</Text>
-          <Button key="reset-soft" label="soft: keep changes staged" plain onPress={() => run($, 'reset', commit.hash, 'soft')} />
-          <Button key="reset-mixed" label="mixed: keep changes unstaged" plain onPress={() => run($, 'reset', commit.hash, 'mixed')} />
-          <Button key="reset-hard" label="hard: discard changes" plain onPress={() => run($, 'reset', commit.hash, 'hard')} />
-          <Button key="reset-cancel" label="cancel" plain dimColor onPress={() => $.state.set(PENDING_REF, null)} />
+          {action(ui, 'reset-soft', 'Soft · keep changes staged', () => run($, 'reset', commit.hash, 'soft'))}
+          {action(ui, 'reset-mixed', 'Mixed · keep them unstaged', () => run($, 'reset', commit.hash, 'mixed'))}
+          {action(ui, 'reset-hard', 'Hard · discard them', () => run($, 'reset', commit.hash, 'hard'))}
+          {quickButton(ui, 'reset-cancel', 'cancel', () => $.state.set(PENDING_REF, null))}
         </Box>
       )}
       {isTagging && Input && (
@@ -1378,39 +1433,44 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
 
 /** A badge's actions, under its row: what fits its kind, and whether it is checked out. */
 function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph) {
-  const { Box, Button, Input, Link, Text } = ui
+  const { Box, Input, Link, Text } = ui
   const isCurrent = ref.kind === 'head'
   const branchName = ref.kind === 'remote' ? splitRemote(ref.name, graph.remotes).branch : ref.name
   const pullRequest = ref.kind !== 'tag' && ref.name !== 'HEAD' ? pullRequestUrl(graph.forge, branchName, graph.defaultBranch) : null
   const isBranch = (ref.kind === 'head' && ref.name !== 'HEAD') || ref.kind === 'local'
-  const armed = (action: RefAction) => pending?.action === action && pending.hash === ref.name
-  const guarded = (action: RefAction, label: string) => (
-    <Button key={action} label={armed(action) ? refConfirmText(action, ref, graph) : label} plain dimColor={!armed(action)} onPress={() => armRef($, action, ref)} />
-  )
+  const armed = (item: RefAction) => pending?.action === item && pending.hash === ref.name
+  const guarded = (item: RefAction, label: string) => action(ui, item, armed(item) ? refConfirmText(item, ref, graph) : label, () => armRef($, item, ref), armed(item))
   const hasRemote = graph.remotes.length > 0
   // How the branch stands against its upstream: what a push and a pull would move
   const upstream = isBranch ? graph.upstreams[ref.name] : undefined
-  const actions = [
-    <Button key="copy-name" label="⧉ copy name" plain onPress={() => copyText($, ref.name, ref.name)} />,
-    pullRequest && <Link key="pull-request" href={pullRequest} label={`↗ pull request into ${graph.defaultBranch}`} />,
-    !isCurrent && guarded('checkout-ref', '⎇ checkout'),
-    !isCurrent && guarded('merge-ref', '⤞ merge into current'),
-    !isCurrent && ref.kind !== 'tag' && guarded('rebase-ref', '⇡ rebase current onto this'),
-    isBranch && Input && <Button key="rename" label="✎ rename…" plain dimColor onPress={() => $.state.set(RENAMING_REF, isRenaming ? null : ref.name)} />,
-    isBranch && hasRemote && guarded('push-ref', '⇡ push'),
-    upstream && <Button key="pull" label={`⇣ pull from ${upstream.name}`} plain dimColor={upstream.behind === 0} onPress={() => pullRef($, ref)} />,
-    ref.kind === 'remote' && <Button key="fetch-ref" label="⇣ fetch" plain dimColor onPress={() => pullRef($, ref)} />,
-    ref.kind === 'local' && guarded(armed('force-delete-branch') ? 'force-delete-branch' : 'delete-branch', '✕ delete'),
-    ref.kind === 'remote' && guarded('delete-remote-branch', '✕ delete on remote'),
-    ref.kind === 'tag' && hasRemote && guarded('push-ref', '⇡ push tag'),
-    ref.kind === 'tag' && guarded('delete-tag', '✕ delete tag')
-  ].filter(Boolean)
+  const kind = ref.kind === 'tag' ? '◆ Tag' : ref.kind === 'remote' ? 'Remote branch' : isCurrent ? 'Current branch' : 'Branch'
 
   return (
     <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
-      <Text color={REF_COLOR[ref.kind]} wrap="truncate-end">{`${ref.kind === 'tag' ? '◆ tag' : ref.kind === 'remote' ? 'remote branch' : isCurrent ? 'current branch' : 'branch'} ${ref.name}`}</Text>
+      {drawPanelTitle(ui, `${kind} ${ref.name}`, '', REF_COLOR[ref.kind], [
+        quickButton(ui, 'copy-name', '⧉ name', () => copyText($, ref.name, ref.name)),
+        pullRequest && <Link key="pull-request" href={pullRequest} label={`↗ pull request into ${graph.defaultBranch}`} />
+      ])}
       {upstream && <Text color={upstream.behind > 0 || upstream.isGone ? 'yellow' : 'gray'} wrap="truncate-end">{describeUpstream(upstream)}</Text>}
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
+      {drawToolbar(ui, [
+        [
+          !isCurrent && guarded('checkout-ref', '⎇ Checkout'),
+          !isCurrent && guarded('merge-ref', '⤞ Merge into current'),
+          !isCurrent && ref.kind !== 'tag' && guarded('rebase-ref', '⇡ Rebase current onto')
+        ],
+        [
+          isBranch && hasRemote && guarded('push-ref', '⇡ Push'),
+          upstream && action(ui, 'pull', `⇣ Pull from ${upstream.name}`, () => pullRef($, ref)),
+          ref.kind === 'remote' && action(ui, 'fetch-ref', '⇣ Fetch', () => pullRef($, ref)),
+          isBranch && Input && action(ui, 'rename', '✎ Rename…', () => $.state.set(RENAMING_REF, isRenaming ? null : ref.name), isRenaming),
+          ref.kind === 'tag' && hasRemote && guarded('push-ref', '⇡ Push tag')
+        ],
+        [
+          ref.kind === 'local' && guarded(armed('force-delete-branch') ? 'force-delete-branch' : 'delete-branch', '✕ Delete'),
+          ref.kind === 'remote' && guarded('delete-remote-branch', '✕ Delete on remote'),
+          ref.kind === 'tag' && guarded('delete-tag', '✕ Delete tag')
+        ]
+      ])}
       {isRenaming && Input && (
         <Input key="rename-branch" label="✎ " value={ref.name} submitLabel="rename" autoFocus onSubmit={(value: string) => renameBranch($, ref.name, value)} />
       )}
@@ -1427,6 +1487,7 @@ function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: D
       {detail.message !== '' && <Text> </Text>}
       {detail.message !== '' && <Markdown key="message" text={linkify(detail.message, graph.forge)} />}
       {detail.files.length > 0 && <Text> </Text>}
+      {detail.files.length > 0 && <Text dimColor bold>{detail.compare ? 'FILES BETWEEN THEM' : 'FILES'}</Text>}
       {detail.files.map(file => drawFile(ui, $, detail.hash, file, diff?.hash === detail.hash && diff.path === file.path ? diff : null))}
     </Box>
   )

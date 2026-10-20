@@ -41,13 +41,13 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
-- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit, `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
+- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit (turning the page at its edges; with none open, the first of the page), `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; **pull from origin/…** moves it to its upstream, fast-forward only, checked out or not, and a line says what a push and a pull would move (`↑1 to push, ↓2 to pull · origin/main`).
   - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
   - a remote branch: **checkout** (a local branch tracking it), **merge into current**, **rebase current onto this**, **fetch**, **delete on remote**.
   - a tag: **checkout** (detached), **merge into current**, **push tag**, **delete tag**.
-- **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. A signed commit says who signed it and whether git trusts the signature (GPG or SSH, as git is set up to check them). Each file shows its status (A, M, D, R) and the lines it added and deleted, and the commit its totals. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
+- **Click a hash** to open the commit under its row, titled with its hash and quick links (copy hash, copy subject, its page on the web), its actions as buttons in groups: what looks around, what changes the current branch, what deletes. A button waiting for its confirming press is drawn as the primary one. Under them: author, date, message and changed files. A signed commit says who signed it and whether git trusts the signature (GPG or SSH, as git is set up to check them). Each file shows its status (A, M, D, R) and the lines it added and deleted, and the commit its totals. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
   - **↗ github.com** (or gitlab.com, bitbucket.org) opens the commit's page. In the message, `#123` links to that issue or pull request and web addresses are links.
   - **⇄ compare…** marks it; every commit opened next lists the files that changed between the two, older to newer, each with its diff (the uncommitted row compares too). **✕ stop comparing** in the header ends it.
   - **copy hash** and **copy subject** to the clipboard.
@@ -60,11 +60,19 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
+Uncommitted changes, opened: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**.
+
+<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
+
+A commit, opened: its actions in groups, the author and date, its lines added and deleted, its message with links, and its files, each opening its diff.
+
+<img alt="A commit opened in the Git Graph pane: its actions, author, date, message and changed files with lines added and deleted" src=".github/commit-detail.png" />
+
 Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
 ## Settings
 
-`limit`: how many commits to load (150 by default). They are drawn 40 at a time.
+`limit`: how many commits to load (150 by default). They are drawn a page of 40 at a time: **older ▾** and **▴ newer** turn the page.
 
 ## How it works
 
