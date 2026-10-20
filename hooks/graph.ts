@@ -13,7 +13,7 @@ export function parseRefs (decoration: string, remotes: Set<string>): Ref[] {
     else if (raw.startsWith('HEAD -> ')) refs.push({ name: raw.slice(8), kind: 'head' })
     else if (raw.startsWith('tag: ')) refs.push({ name: raw.slice(5), kind: 'tag' })
     else if (raw.endsWith('/HEAD')) continue
-    else if (remotes.has(raw.split('/')[0])) refs.push({ name: raw, kind: 'remote' })
+    else if (remotes.has(raw.split('/')[0] ?? '')) refs.push({ name: raw, kind: 'remote' })
     else refs.push({ name: raw, kind: 'local' })
   }
   const order = { head: 0, local: 1, remote: 2, tag: 3 }
@@ -23,7 +23,7 @@ export function parseRefs (decoration: string, remotes: Set<string>): Ref[] {
 /** One `git log --format=FORMAT` output → commits, without their graph cells yet. */
 export function parseLog (stdout: string, remotes: Set<string>): Commit[] {
   return stdout.split('\n').filter(line => line.includes(SEP)).map(line => {
-    const [hash, parents, decoration, author, date, ...subject] = line.split(SEP)
+    const [hash = '', parents = '', decoration = '', author = '', date = '', ...subject] = line.split(SEP)
     return {
       hash,
       parents: parents ? parents.split(' ') : [],
@@ -86,15 +86,14 @@ export function layout (commits: Commit[]): Commit[] {
     // Horizontal lines from the commit to every lane that joins it or forks from it
     for (const target of [...joining, ...forks]) {
       const [from, to] = target > col ? [2 * col + 1, 2 * target - 1] : [2 * target + 1, 2 * col - 1]
-      for (let p = from; p <= to; p++) {
-        const cell = cells[p]
+      for (const cell of cells.slice(from, to + 1)) {
         cell.lane = target
         if (cell.ch === ' ') cell.ch = '─'
         else if (cell.ch === '│') cell.ch = '┼'
       }
     }
 
-    while (cells.length > 0 && cells[cells.length - 1].ch === ' ') cells.pop()
+    while (cells.at(-1)?.ch === ' ') cells.pop()
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
     commit.cells = cells
   }

@@ -252,7 +252,7 @@ async function arm ($: Engine, action: Pending['action'], hash: string) {
       }
     }
   } catch (error) {
-    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0])
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
   }
   await reload($)
 }
