@@ -4,7 +4,8 @@
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
 // - Click a branch or tag badge for its actions: checkout, merge, rebase, rename, push, pull,
 //   delete, fetch, copy the name.
-// - Click a hash to open that commit under its row: its files and a row of actions.
+// - Click a hash to open that commit under its row: its files and a row of actions. Mark one
+//   to compare, and every commit opened next lists what changed between the two.
 //   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick, revert, merge, rebase, reset) ask for
 //   a second click to confirm; a tag is named in a field under the commit;
@@ -44,6 +45,7 @@ const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
 const TAGGING_REF = { plugin: 'git-graph', key: 'tagging' } as const
 const REF_REF = { plugin: 'git-graph', key: 'ref' } as const
 const STASHING_REF = { plugin: 'git-graph', key: 'stashing' } as const
+const COMPARE_REF = { plugin: 'git-graph', key: 'compareBase' } as const
 const RENAMING_REF = { plugin: 'git-graph', key: 'renaming' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
@@ -59,6 +61,7 @@ const QUERY = atom(QUERY_REF, '')
 const TAGGING = atom(TAGGING_REF, null)
 const REF = atom(REF_REF, null)
 const STASHING = atom(STASHING_REF, null)
+const COMPARE = atom(COMPARE_REF, null)
 const RENAMING = atom(RENAMING_REF, null)
 
 // One color per lane, cycling, like Git Graph's palette
@@ -141,6 +144,7 @@ export const register: Register = (on, options) => {
     await $.state.set(NOTE_REF, null)
     await $.state.set(QUERY_REF, '')
     await $.state.set(REF_REF, null)
+    await $.state.set(COMPARE_REF, null)
     return next(e)
   })
 }
@@ -235,6 +239,8 @@ async function select ($: Engine, hash: string) {
 
 async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>> {
   const graph = await read($, GRAPH)
+  const base = await read($, COMPARE)
+  if (base !== null && base !== hash && graph) return readComparison($, graph, base, hash)
   if (hash === WORKTREE) {
     const files = graph?.changes ?? []
     return { hash, meta: `${files.length} ${files.length === 1 ? 'file' : 'files'} changed in the working tree`, message: '', files }
@@ -253,6 +259,38 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
   }
 }
 
+/** What changed from the older of two rows to the newer: the working tree is the newest of all. */
+async function readComparison ($: Engine, graph: Graph, base: string, hash: string): Promise<NonNullable<Detail>> {
+  const order = (target: string) => graph.commits.findIndex(commit => commit.hash === target)
+  const [from, to] = order(base) > order(hash) ? [base, hash] : [hash, base]
+  const label = (target: string) => (target === WORKTREE ? 'the working tree' : target.slice(0, HASH_WIDTH))
+  try {
+    const names = await git($, ['diff', '--name-status', '-M', from, ...(to === WORKTREE ? [] : [to])])
+    const files = parseNameStatus(names)
+    return { hash, meta: `${files.length} ${files.length === 1 ? 'file' : 'files'} changed from ${label(from)} to ${label(to)}`, message: '', files, compare: { from, to } }
+  } catch (error) {
+    return { hash, meta: `Could not compare them: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
+  }
+}
+
+/** Marks this commit to compare others with, or stops comparing when it is the one marked. */
+async function toggleCompare ($: Engine, hash: string) {
+  const base = await read($, COMPARE)
+  await $.state.set(COMPARE_REF, base === hash ? null : hash)
+  if (base !== hash) await note($, 'info', `comparing with ${hash === WORKTREE ? 'the working tree' : hash.slice(0, HASH_WIDTH)}: open another commit`)
+  else await $.state.set(NOTE_REF, null)
+}
+
+async function stopComparing ($: Engine) {
+  await $.state.set(COMPARE_REF, null)
+  await $.state.set(NOTE_REF, null)
+  const selected = await read($, SELECTED)
+  if (selected) {
+    await $.state.set(DIFF_REF, null)
+    await $.state.set(DETAIL_REF, await readDetail($, selected))
+  }
+}
+
 /** Opens one file's diff under it, or closes it when it is the one open. */
 async function toggleDiff ($: Engine, hash: string, file: FileChange) {
   const open = await read($, DIFF)
@@ -267,7 +305,11 @@ async function readDiff ($: Engine, hash: string, file: FileChange): Promise<Non
   const paths = ['--', ...(file.oldPath ? [file.oldPath] : []), file.path]
   try {
     let stdout: string
-    if (hash === WORKTREE) {
+    const detail = await read($, DETAIL)
+    const compare = detail?.hash === hash ? detail.compare : undefined
+    if (compare) {
+      stdout = await git($, ['diff', '-M', compare.from, ...(compare.to === WORKTREE ? [] : [compare.to]), ...paths])
+    } else if (hash === WORKTREE) {
       // An untracked file is new against nothing; `--no-index` exits 1 when they differ
       stdout = file.status === '?'
         ? await git($, ['diff', '--no-index', '--', '/dev/null', file.path], [0, 1])
@@ -715,6 +757,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
   const stashing = await read($, STASHING)
+  const compareBase = await read($, COMPARE)
   const openRef = await read($, REF)
   const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
@@ -763,6 +806,12 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
         </Box>
       )}
+      {compareBase !== null && (
+        <Box flexDirection="row" columnGap={2}>
+          <Text color="cyan" wrap="truncate-end">{`⇄ comparing with ${compareBase === WORKTREE ? 'the working tree' : compareBase.slice(0, HASH_WIDTH)}`}</Text>
+          <Button key="compare-stop" label="✕ stop comparing" plain dimColor onPress={() => stopComparing($)} />
+        </Box>
+      )}
       {lastNote && <Text color={NOTE_COLOR[lastNote.kind]} wrap="truncate-end">{lastNote.text}</Text>}
     </Box>
   )
@@ -794,7 +843,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
-    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash }, graph, graphWidth))
+    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
   }
 
   return (
@@ -891,14 +940,19 @@ function drawRow (
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
   ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
-  pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean }, graph: Graph, graphWidth: number
+  pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean; compareBase: string | null }, graph: Graph, graphWidth: number
 ) {
-  const { Box, Text } = ui
+  const { Box, Button, Text } = ui
+  const isBase = fields.compareBase === commit.hash
+  const compareButton = (
+    <Button key="compare" label={isBase ? '⇄ marked: open another commit · press to unmark' : fields.compareBase ? '⇄ compare with this instead' : '⇄ compare…'} plain dimColor={!isBase} onPress={() => toggleCompare($, commit.hash)} />
+  )
   const isWorktree = commit.kind === 'worktree'
 
   return (
     <Box key={`detail-${commit.hash}`} flexDirection="column" marginLeft={graphWidth} marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.stash ? `${commit.stash}  ${commit.hash}` : commit.hash}</Text>
+      {compareButton}
       {isWorktree
         ? drawWorktreeActions(ui, $, fields.isStashing)
         : commit.kind === 'stash'

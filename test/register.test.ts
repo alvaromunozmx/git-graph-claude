@@ -434,3 +434,33 @@ test('uncommitted changes stash with a message, untracked files included', async
   await ui.input({ key: 'stash-message', text: 'half done' })
   expect(seen.git.findLast(args => args[0] === 'stash' && args[1] !== 'list')).toEqual(['stash', 'push', '--include-untracked', '-m', 'half done'])
 })
+
+test('two commits compare: the files and diffs from the older to the newer', async ($, on) => {
+  const seen = world(on, { diff: args => (args[0] === '--name-status' ? 'M\tREADME.md\nD\told.ts\n' : REPO.diff as string) })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    await ui.press({ key: 'compare' })
+    expect(await ui.find({ type: 'Text', text: '⇄ comparing with b2' })).toBeDefined()
+    await ui.press({ key: 'hash-a1' })
+    expect(await ui.find({ type: 'Text', text: '2 files changed from a1 to b2' })).toBeDefined()
+    expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--name-status', '-M', 'a1', 'b2'])
+    await ui.press({ key: 'file-old.ts' })
+    expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '-M', 'a1', 'b2', '--', 'old.ts'])
+    await ui.press({ key: 'compare-stop' })
+    expect(await ui.find({ type: 'Text', text: '⇄ comparing with b2' })).toBeUndefined()
+    // The open commit goes back to its own files
+    expect(await ui.find({ type: 'Text', text: /changed from/ })).toBeUndefined()
+    await ui.press({ key: 'hash-a1' })
+  }
+})
+
+test('the working tree compares with a commit', async ($, on) => {
+  const seen = world(on, { status: ' M a.ts\n', diff: 'M\ta.ts\n' })
+  await $.command.run(typed(''))
+  const ui = await open($, 'desktop', 'a1')
+  await ui.press({ key: 'compare' })
+  await ui.press({ key: 'hash-worktree' })
+  expect(await ui.find({ type: 'Text', text: '1 file changed from a1 to the working tree' })).toBeDefined()
+  expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--name-status', '-M', 'a1'])
+})
