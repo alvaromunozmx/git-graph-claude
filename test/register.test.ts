@@ -512,3 +512,42 @@ test('the walk follows the find field', async ($, on) => {
   await ui.press({ key: 'next' })
   expect((await ui.find({ key: 'hash-a1' }))?.props.dimColor).toBe(false)
 })
+
+test('the settings dim merges, and commits HEAD does not reach', async ($, on) => {
+  const log = [
+    ['m4', 'b2 c3', 'HEAD -> main', 'Alvaro', '19 Oct 2026 13:00', 'merge feature'],
+    ['d5', 'a1', 'other', 'Ana', '19 Oct 2026 12:00', 'elsewhere'],
+    ['c3', 'a1', 'feature', 'Ana', '19 Oct 2026 11:00', 'feature work'],
+    ['b2', 'a1', '', 'Alvaro', '19 Oct 2026 10:00', 'second commit'],
+    ['a1', '', '', 'Alvaro', '18 Oct 2026 09:00', 'first commit']
+  ].map(row => row.join(SEP)).join('\n')
+  world(on, { log, 'rev-parse': 'm4\n' })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    // The innermost Text holding the subject is the one styled
+    const dim = async (subject: string) => (await ui.findAll({ type: 'Text', text: subject })).at(-1)?.props.dimColor
+    // Merges are dim by default, like Git Graph
+    expect(await dim('merge feature')).toBe(true)
+    expect(await dim('elsewhere')).toBe(false)
+    await ui.press({ key: 'settings' })
+    await ui.press({ key: 'mute-merges' })
+    expect(await dim('merge feature')).toBe(false)
+    await ui.press({ key: 'mute-others' })
+    expect(await dim('elsewhere')).toBe(true)
+    expect(await dim('feature work')).toBe(false)
+    await ui.press({ key: 'mute-others' })
+    await ui.press({ key: 'mute-merges' })
+    await ui.press({ key: 'settings' })
+  }
+})
+
+test('compact lives in the settings row', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ key: 'compact' })).toBeUndefined()
+  await ui.press({ key: 'settings' })
+  await ui.press({ key: 'compact' })
+  expect((await ui.find({ key: 'compact' }))?.props.label).toBe('compact')
+})

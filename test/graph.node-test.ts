@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -121,4 +121,10 @@ test('numstat counts lines per file, renames by their new path, binaries apart',
   assert.deepEqual(files, [{ status: 'M', path: 'src/a.ts', added: 12, deleted: 3 }, { status: 'A', path: 'logo.png', isBinary: true }])
   assert.equal(summary(files), '2 files changed, +12 −3')
   assert.equal(summary([{ status: 'M', path: 'a' }]), '1 file changed')
+})
+
+test('the ancestors of HEAD follow every parent, among the commits loaded', () => {
+  const commits = parseLog(log([['m', 'b f'], ['x', 'a'], ['f', 'a'], ['b', 'a'], ['a', 'gone']]), new Set())
+  assert.deepEqual([...ancestorsOf(commits, 'm')].sort(), ['a', 'b', 'f', 'm'])
+  assert.equal(ancestorsOf(commits, '').size, 0)
 })

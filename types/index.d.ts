@@ -32,6 +32,8 @@ export type Graph = {
   branches: string[]
   /** The repo's remotes, `origin` first when there is one */
   remotes: string[]
+  /** The commit HEAD points at, or '' in a repo with no commit */
+  head: string
   error: string | null
   loadedAt: number
 }
@@ -74,6 +76,12 @@ declare module 'claude-code' {
       branchFilter: string | null
       shown: number
       compact: boolean
+      /** The settings row under the header is open */
+      settingsOpen: boolean
+      /** Merge commits are drawn dim */
+      muteMerges: boolean
+      /** Commits HEAD does not reach are drawn dim */
+      muteOthers: boolean
       pending: Pending | null
       note: Note | null
       /** The branch or tag badge whose actions are open */

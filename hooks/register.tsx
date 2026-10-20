@@ -21,7 +21,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -41,6 +41,9 @@ const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
 const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
+const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
+const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
+const MUTE_OTHERS_REF = { plugin: 'git-graph', key: 'muteOthers' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
 const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
@@ -57,6 +60,9 @@ const ALL = atom(ALL_REF, true)
 const FILTER = atom(FILTER_REF, null)
 const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
+const SETTINGS = atom(SETTINGS_REF, false)
+const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
+const MUTE_OTHERS = atom(MUTE_OTHERS_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
 const QUERY = atom(QUERY_REF, '')
@@ -203,12 +209,13 @@ async function load ($: Engine) {
       changes,
       branches,
       remotes,
+      head: headHash,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -409,6 +416,18 @@ async function find ($: Engine, value: string) {
 
 async function toggleCompact ($: Engine) {
   await $.state.set(COMPACT_REF, !(await read($, COMPACT)))
+}
+
+async function toggleSettings ($: Engine) {
+  await $.state.set(SETTINGS_REF, !(await read($, SETTINGS)))
+}
+
+async function toggleMuteMerges ($: Engine) {
+  await $.state.set(MUTE_MERGES_REF, !(await read($, MUTE_MERGES)))
+}
+
+async function toggleMuteOthers ($: Engine) {
+  await $.state.set(MUTE_OTHERS_REF, !(await read($, MUTE_OTHERS)))
 }
 
 async function note ($: Engine, kind: Note['kind'], text: string) {
@@ -809,6 +828,9 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const allBranches = await read($, ALL)
   const filter = await read($, FILTER)
   const compact = await read($, COMPACT)
+  const settingsOpen = await read($, SETTINGS)
+  const muteMerges = await read($, MUTE_MERGES)
+  const muteOthers = await read($, MUTE_OTHERS)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
   const stashing = await read($, STASHING)
@@ -833,7 +855,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>{graph && !graph.error ? `  ·  ${count} commits${count >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
         </Text>
         <Box flexDirection="row" columnGap={2}>
-          <Button key="compact" label={compact ? 'compact' : 'spaced'} plain dimColor onPress={() => toggleCompact($)} />
+          <Button key="settings" label={settingsOpen ? '⚙ ▾' : '⚙'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
           {Select && graph && graph.branches.length > 0
             ? (
               <Select
@@ -859,6 +881,15 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           </Box>
           {query !== '' && <Text dimColor>{`${matching} ${matching === 1 ? 'match' : 'matches'}`}</Text>}
           {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
+        </Box>
+      )}
+      {settingsOpen && (
+        <Box key="settings-row" flexDirection="row" columnGap={2} flexWrap="wrap">
+          <Text dimColor>lanes:</Text>
+          <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />
+          <Text dimColor>dim:</Text>
+          <Button key="mute-merges" label={`${muteMerges ? '☑' : '☐'} merge commits`} plain onPress={() => toggleMuteMerges($)} />
+          <Button key="mute-others" label={`${muteOthers ? '☑' : '☐'} commits HEAD does not reach`} plain onPress={() => toggleMuteOthers($)} />
         </Box>
       )}
       {compareBase !== null && (
@@ -892,10 +923,15 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const showMeta = columns >= graphWidth + metaWidth + HASH_WIDTH + 30
   const textWidth = columns - graphWidth - HASH_WIDTH - 3 - (showMeta ? metaWidth + 1 : 0)
 
+  // Dim, as the settings say: merges, and commits that are no ancestor of HEAD
+  const reached = muteOthers ? ancestorsOf(graph.commits, graph.head) : null
+  const isMuted = (commit: Commit) => query === '' && !commit.kind &&
+    ((muteMerges && commit.parents.length > 1) || (reached !== null && !reached.has(commit.hash)))
+
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef }))
+    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
@@ -949,9 +985,8 @@ function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
 
 function drawRow (
   Box: any, Button: any, Text: any, $: Engine, commit: Commit, cells: Commit['cells'],
-  { graphWidth, textWidth, showMeta, isSelected, query, openRef }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null }
+  { graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
 ) {
-  const isMerge = commit.parents.length > 1
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
   // Narrow panes also shorten long branch names, so the subject keeps some room.
   let room = Math.max(10, textWidth)
@@ -980,7 +1015,7 @@ function drawRow (
         })}
         {commit.stash && <Text color="cyan">{`[${commit.stash}] `}</Text>}
         <Text wrap="truncate-end">
-          {drawLit(Text, cut(commit.subject, room - (commit.stash ? commit.stash.length + 3 : 0)), query, { dimColor: (isMerge || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
+          {drawLit(Text, cut(commit.subject, room - (commit.stash ? commit.stash.length + 3 : 0)), query, { dimColor: (isMuted || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
       {showMeta && (
