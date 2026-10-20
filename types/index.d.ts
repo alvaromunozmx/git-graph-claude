@@ -23,6 +23,9 @@ export type Commit = {
  */
 export type FileChange = { status: string; path: string; oldPath?: string; added?: number; deleted?: number; isBinary?: true }
 
+/** Where the repo's first remote lives on the web, for links to its commits and issues. */
+export type Forge = { base: string; host: string; kind: 'github' | 'gitlab' | 'bitbucket' | 'other' }
+
 export type Graph = {
   commits: Commit[]
   branch: string
@@ -34,6 +37,8 @@ export type Graph = {
   remotes: string[]
   /** The commit HEAD points at, or '' in a repo with no commit */
   head: string
+  /** The first remote's web address, when it has one */
+  forge: Forge | null
   error: string | null
   loadedAt: number
 }

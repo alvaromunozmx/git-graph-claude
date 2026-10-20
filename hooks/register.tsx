@@ -21,7 +21,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, commitUrl, FORMAT, forgeOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -198,6 +198,7 @@ async function load ($: Engine) {
       ])
     ])
     const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
+    const forge = remotes[0] ? forgeOf(await git($, ['remote', 'get-url', remotes[0]]).catch(() => '')) : null
     const parsed = withStashes(parseLog(log, new Set(remotes)), parseStashes(stashList))
     const changes = parseStatus(status)
     // The uncommitted row leads to HEAD, so the layout draws its line down to it
@@ -210,12 +211,13 @@ async function load ($: Engine) {
       branches,
       remotes,
       head: headHash,
+      forge,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -1059,7 +1061,7 @@ function drawDetail (
       <Text> </Text>
       {!detail || detail.isLoading
         ? <Text dimColor>Loading…</Text>
-        : drawDetailBody(ui, $, detail, diff)}
+        : drawDetailBody(ui, $, detail, diff, graph)}
     </Box>
   )
 }
@@ -1105,7 +1107,10 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
   const guarded = (action: CommitAction, label: string) => (
     <Button key={action} label={armed(action) ? confirmText(action, commit, graph.branch) : label} plain dimColor={!armed(action)} onPress={() => arm($, action, commit.hash)} />
   )
+  const { Link } = ui
+  const page = commitUrl(graph.forge, commit.hash)
   const actions = [
+    page && <Link key="web" href={page} label={`↗ ${graph.forge?.host}`} />,
     <Button key="copy" label="⧉ copy hash" plain onPress={() => copyText($, commit.hash, commit.hash.slice(0, HASH_WIDTH))} />,
     <Button key="copy-subject" label="⧉ copy subject" plain dimColor onPress={() => copyText($, commit.subject, 'the subject')} />,
     !isHead && guarded('checkout', '⎇ checkout'),
@@ -1173,13 +1178,13 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
   )
 }
 
-function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: Diff) {
-  const { Box, Text } = ui
+function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: Diff, graph: Graph) {
+  const { Box, Markdown, Text } = ui
   return (
     <Box flexDirection="column">
       <Text dimColor wrap="truncate-end">{detail.meta}</Text>
       {detail.message !== '' && <Text> </Text>}
-      {detail.message !== '' && detail.message.split('\n').map((line, i) => <Text key={`line-${i}`} wrap="truncate-end">{line || ' '}</Text>)}
+      {detail.message !== '' && <Markdown key="message" text={linkify(detail.message, graph.forge)} />}
       {detail.files.length > 0 && <Text> </Text>}
       {detail.files.map(file => drawFile(ui, $, detail.hash, file, diff?.hash === detail.hash && diff.path === file.path ? diff : null))}
     </Box>

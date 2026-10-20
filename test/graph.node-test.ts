@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, commitUrl, DIFF_LIMIT, draw, forgeOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -127,4 +127,22 @@ test('the ancestors of HEAD follow every parent, among the commits loaded', () =
   const commits = parseLog(log([['m', 'b f'], ['x', 'a'], ['f', 'a'], ['b', 'a'], ['a', 'gone']]), new Set())
   assert.deepEqual([...ancestorsOf(commits, 'm')].sort(), ['a', 'b', 'f', 'm'])
   assert.equal(ancestorsOf(commits, '').size, 0)
+})
+
+test('remote URLs of every shape point to their web pages', () => {
+  assert.deepEqual(forgeOf('git@github.com:o/r.git'), { base: 'https://github.com/o/r', host: 'github.com', kind: 'github' })
+  assert.deepEqual(forgeOf('https://gitlab.com/group/sub/r.git'), { base: 'https://gitlab.com/group/sub/r', host: 'gitlab.com', kind: 'gitlab' })
+  assert.deepEqual(forgeOf('ssh://git@bitbucket.org:22/o/r'), { base: 'https://bitbucket.org/o/r', host: 'bitbucket.org', kind: 'bitbucket' })
+  assert.deepEqual(forgeOf('https://user@git.example.com/o/r/'), { base: 'https://git.example.com/o/r', host: 'git.example.com', kind: 'other' })
+  assert.equal(forgeOf('/srv/repos/r.git'), null)
+  assert.equal(commitUrl(forgeOf('https://gitlab.com/o/r'), 'abc'), 'https://gitlab.com/o/r/-/commit/abc')
+  assert.equal(commitUrl(forgeOf('https://git.example.com/o/r'), 'abc'), null)
+})
+
+test('messages link issue numbers and web addresses, and leave the rest', () => {
+  const github = forgeOf('git@github.com:o/r.git')
+  assert.equal(linkify('Fix #3, see #4.\n#5 at the start', github), 'Fix [#3](https://github.com/o/r/issues/3), see [#4](https://github.com/o/r/issues/4).\n[#5](https://github.com/o/r/issues/5) at the start')
+  assert.equal(linkify('Docs at https://x.dev/a?b=1.', github), 'Docs at <https://x.dev/a?b=1>.')
+  assert.equal(linkify('color #fff, a&#39;s, path/#2', github), 'color #fff, a&#39;s, path/#2')
+  assert.equal(linkify('Fix #3', null), 'Fix #3')
 })
