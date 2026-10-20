@@ -29,6 +29,17 @@ export function parseNameStatus (stdout: string): FileChange[] {
   })
 }
 
+/** `git for-each-ref --format=%(refname)` → branch names, local first; the remotes' HEAD left out. */
+export function parseBranches (stdout: string): string[] {
+  const local: string[] = []
+  const remote: string[] = []
+  for (const ref of stdout.split('\n').map(line => line.trim()).filter(Boolean)) {
+    if (ref.startsWith('refs/heads/')) local.push(ref.slice(11))
+    else if (ref.startsWith('refs/remotes/') && !ref.endsWith('/HEAD')) remote.push(ref.slice(13))
+  }
+  return [...local, ...remote]
+}
+
 /** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */
 export const DIFF_LIMIT = 60000
 

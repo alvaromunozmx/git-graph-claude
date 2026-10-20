@@ -1,6 +1,6 @@
 {
   "name": "git-graph",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A Git Graph pane for Claude Code: branches, tags, remotes and each commit's details, refreshed after every turn.",
   "author": {
     "name": "Alvaro Muñoz",

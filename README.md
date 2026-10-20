@@ -20,7 +20,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **⌕ find** keeps only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files, and **✎ commit…** to have Claude propose a message and commit them.
 - **spaced / compact** switches between lanes with a gap and lanes side by side.
-- **all branches / current branch** shows every branch or only the current one (also `/git-graph all` and `/git-graph current`).
+- **The branch picker** shows every branch, only the current one, or any one local or remote branch alone (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
 - **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
   - **copy hash** to the clipboard.

@@ -23,6 +23,8 @@ export type Graph = {
   branch: string
   /** Files with uncommitted changes */
   changes: FileChange[]
+  /** Local branches, then remote ones, for the branch picker */
+  branches: string[]
   error: string | null
   loadedAt: number
 }
@@ -46,6 +48,8 @@ declare module 'claude-code' {
       detail: Detail
       diff: Diff
       allBranches: boolean
+      /** One branch to draw alone, picked in the header; null: every branch or the current one */
+      branchFilter: string | null
       shown: number
       compact: boolean
       pending: Pending | null
