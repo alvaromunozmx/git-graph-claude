@@ -120,13 +120,13 @@ test('a commit opens with its message and the files it changed', async ($, on) =
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     await ui.press({ key: 'hash-b2' })
-    expect(await ui.find({ type: 'Text', text: 'The body.' })).toBeDefined()
+    expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('second commit\n\nThe body.')
     expect(await ui.find({ key: 'file-hooks/register.tsx' })).toBeDefined()
     expect(await ui.find({ key: 'file-README.md' })).toBeDefined()
     // b2's files are read against its first parent
     expect(seen.git.find(args => args[0] === 'diff-tree')).toEqual(['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', 'a1', 'b2'])
     await ui.press({ key: 'hash-b2' })
-    expect(await ui.find({ type: 'Text', text: 'The body.' })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
   }
 })
 
@@ -550,4 +550,20 @@ test('compact lives in the settings row', async ($, on) => {
   await ui.press({ key: 'settings' })
   await ui.press({ key: 'compact' })
   expect((await ui.find({ key: 'compact' }))?.props.label).toBe('compact')
+})
+
+test('a message links its issues, and the commit its page, on GitHub', async ($, on) => {
+  world(on, {
+    remote: args => (args[0] === 'get-url' ? 'git@github.com:alvaromunozmx/git-graph-claude.git\n' : 'origin\n'),
+    show: 'Alvaro <a@b.c> · today\nFix the pane (#12)\n\nSee https://example.com/a.\n'
+  })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe(
+      'Fix the pane ([#12](https://github.com/alvaromunozmx/git-graph-claude/issues/12))\n\nSee <https://example.com/a>.'
+    )
+    expect((await ui.find({ type: 'Link' }))?.props).toMatchObject({ href: 'https://github.com/alvaromunozmx/git-graph-claude/commit/b2', label: '↗ github.com' })
+    await ui.press({ key: 'hash-b2' })
+  }
 })

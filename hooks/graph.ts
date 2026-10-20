@@ -1,6 +1,6 @@
 // The pure part of Git Graph: reading `git log` and laying commits out in lanes.
 // Nothing here touches Claude Code, so it can be tested with plain Node.
-import type { Cell, Commit, FileChange, Ref } from '../types'
+import type { Cell, Commit, FileChange, Forge, Ref } from '../types'
 
 export const SEP = '\x1f'
 export const FORMAT = ['%H', '%P', '%D', '%an', '%ad', '%s'].join('%x1f')
@@ -264,6 +264,38 @@ export function ancestorsOf (commits: Commit[], head: string): Set<string> {
     queue.push(...(parents.get(hash) ?? []))
   }
   return reached
+}
+
+/** A remote's URL (`git@host:owner/repo.git`, `https://host/owner/repo`, `ssh://…`) → its web address. */
+export function forgeOf (url: string): Forge | null {
+  const trimmed = url.trim()
+  const match = trimmed.match(/^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/) ??
+    trimmed.match(/^[\w.-]+@([^:/]+):(.+?)(?:\.git)?\/?$/)
+  if (!match) return null
+  const host = (match[1] ?? '').toLowerCase()
+  const kind = host.includes('github') ? 'github' : host.includes('gitlab') ? 'gitlab' : host.includes('bitbucket') ? 'bitbucket' : 'other'
+  return { base: `https://${host}/${match[2]}`, host, kind }
+}
+
+/** A commit's page on its forge, where the forge is one whose pages are known. */
+export function commitUrl (forge: Forge | null, hash: string): string | null {
+  if (!forge || forge.kind === 'other') return null
+  return `${forge.base}${forge.kind === 'gitlab' ? '/-/commit/' : forge.kind === 'bitbucket' ? '/commits/' : '/commit/'}${hash}`
+}
+
+/** An issue's page (GitHub sends a pull request's number on to it as well). */
+export function issueUrl (forge: Forge | null, number: string): string | null {
+  if (!forge || forge.kind === 'other') return null
+  return `${forge.base}${forge.kind === 'gitlab' ? '/-/issues/' : '/issues/'}${number}`
+}
+
+/** A commit message as markdown: its web addresses and `#123` issue numbers become links. */
+export function linkify (message: string, forge: Forge | null): string {
+  return message.replace(/(https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"])|(^|[^\w&/#])#(\d+)\b/gm, (whole, url: string | undefined, before: string | undefined, number: string | undefined) => {
+    if (url) return `<${url}>`
+    const href = issueUrl(forge, number ?? '')
+    return href ? `${before ?? ''}[#${number}](${href})` : whole
+  })
 }
 
 /** The cells as plain text, for tests and for the transcript fallback. */
