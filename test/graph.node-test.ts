@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, parseTagInput, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -94,4 +94,10 @@ test('a match splits its text around the lit part', () => {
 
 test('branches list local ones first and leave the remotes HEAD out', () => {
   assert.deepEqual(parseBranches('refs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/heads/main\nrefs/heads/feat/x\n'), ['main', 'feat/x', 'origin/main'])
+})
+
+test('a tag field reads a name, and a message after a colon', () => {
+  assert.deepEqual(parseTagInput(' v1.2 '), { name: 'v1.2' })
+  assert.deepEqual(parseTagInput('v1.2: first release'), { name: 'v1.2', message: 'first release' })
+  assert.deepEqual(parseTagInput('v1.2:  '), { name: 'v1.2' })
 })
