@@ -41,8 +41,12 @@ const typed = (args: string) =>
 /** The engine beneath the mod: a repo on `main`, and a record of what the mod asked for. */
 function world (on: On, repo: Repo = {}) {
   const answers: Repo = { ...REPO, ...repo }
-  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][], prompts: [] as string[], cwds: [] as string[] }
+  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][], prompts: [] as string[], cwds: [] as string[], toasts: [] as string[] }
   mock.clock(on, { now: 0 })
+  on('ui.toast', ($, e) => {
+    seen.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('command.register', ($, e) => {
@@ -390,7 +394,9 @@ test('fetch brings every remote, pruned', async ($, on) => {
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'fetch' })
   expect(seen.git.findLast(args => args[0] === 'fetch')).toEqual(['fetch', '--all', '--prune', '--tags'])
-  expect(await ui.find({ type: 'Text', text: 'fetched every remote' })).toBeDefined()
+  // Done, it is a toast; the line that said it was under way is gone
+  expect(seen.toasts.at(-1)).toBe('Git Graph · fetched every remote')
+  expect(await ui.find({ type: 'Text', text: /fetch/ })).toBeUndefined()
   // The log is read again after it
   expect(seen.git.at(-1)?.[0]).not.toBe('fetch')
 })
@@ -551,7 +557,7 @@ test('the settings dim merges, and commits HEAD does not reach', async ($, on) =
   }
 })
 
-test('compact lives in the settings row', async ($, on) => {
+test('compact lives in the settings panel', async ($, on) => {
   world(on)
   await $.command.run(typed(''))
   const ui = await mount($, 'desktop')
@@ -781,6 +787,68 @@ test('a commit panel has a title, quick links and its actions in groups', async 
     expect((await ui.find({ key: 'merge' }))?.props.variant).toBeUndefined()
     await ui.press({ key: 'hash-a1' })
   }
+})
+
+test('the keys answer with the settings closed: their buttons stay in the header', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  for (const surface of [...SURFACES, 'mobile'] as const) {
+    const ui = await $.ui.mount({ plugin: 'git-graph', surface, component: 'Pane', requestId: 'git-graph', props: PANE_PROPS })
+    expect(await ui.find({ key: 'settings-panel' })).toBeUndefined()
+    // Mobile draws no find field, so no s
+    const hotkeys = { next: 'j', previous: 'k', head: 'h', fetch: 'f', reload: 'r', ...(surface === 'mobile' ? {} : { 'focus-find': 's' }) }
+    for (const [key, hotkey] of Object.entries(hotkeys)) {
+      expect((await ui.find({ key }))?.props.hotkey).toBe(hotkey)
+    }
+    const all = (await ui.findAll({ type: 'Button' })).map(button => button.props.hotkey).filter(Boolean)
+    expect(all.sort()).toEqual(Object.values(hotkeys).sort())
+    // The branch in the header is the h button
+    expect((await ui.find({ key: 'head' }))?.text).toContain('⎇ main')
+    // No row of keys at the bottom any more
+    expect(await ui.find({ key: 'keys' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /esc/ })).toBeUndefined()
+  }
+})
+
+test('the settings panel draws a line per group, the keys among them', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'settings' })
+    expect((await ui.find({ key: 'settings-panel' }))?.props.borderStyle).toBe('round')
+    for (const label of ['Lanes', 'Columns', 'Dim', 'Keys']) expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
+    expect((await ui.find({ key: 'setting-columns' }))?.text).toContain('☑ author')
+    expect((await ui.find({ key: 'setting-dim' }))?.text).toContain('☑ merge commits')
+    expect(await ui.find({ type: 'Text', text: 'j next · k previous · h HEAD · s find · f fetch · r reload · esc close' })).toBeDefined()
+    // The keys are told there, not pressed there: the header keeps them
+    expect((await ui.findAll({ type: 'Button' })).filter(button => button.props.hotkey === 'j')).toHaveLength(1)
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ type: 'Text', text: 'Keys' })).toBeUndefined()
+  }
+})
+
+test('a checkout is a toast, not a line repeating the branch the header shows', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'ref-local-feature' })
+  await ui.press({ key: 'checkout-ref' })
+  await ui.press({ key: 'checkout-ref' })
+  expect(seen.git.findLast(args => args[0] === 'switch')).toEqual(['switch', 'feature'])
+  expect(seen.toasts.at(-1)).toBe('Git Graph · checked out feature')
+  expect(await ui.find({ type: 'Text', text: /checked out/ })).toBeUndefined()
+})
+
+test('an error stays under the header, with a toast', async ($, on) => {
+  const seen = world(on, { status: ' M a.ts\n' })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'terminal')
+  await ui.press({ key: 'ref-local-feature' })
+  await ui.press({ key: 'checkout-ref' })
+  await ui.press({ key: 'checkout-ref' })
+  expect((await ui.find({ type: 'Text', text: 'uncommitted changes: commit or stash them first' }))?.props.color).toBe('red')
+  expect(seen.toasts.at(-1)).toBe('Git Graph · uncommitted changes: commit or stash them first')
 })
 
 /** A long straight history, `count` commits, the newest first. */
