@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { checkoutCommit, checkoutRemote, git } from '../hooks/commands.ts'
-import { FORMAT, layout, parseBranches, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, STASH_FORMAT } from '../hooks/graph.ts'
+import { describeUpstream, FORMAT, layout, parseBranches, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseUpstreams, STASH_FORMAT, UPSTREAM_FORMAT } from '../hooks/graph.ts'
 
 const ENV = {
   ...process.env,
@@ -270,6 +270,61 @@ test('stashes: push with untracked files, apply, pop, drop and branch', () => {
     ok(r.work, git.stashPush('to drop'))
     ok(r.work, git.stash('drop', 'stash@{0}'))
     assert.equal(ok(r.work, ['stash', 'list']).trim(), '')
+  } finally {
+    r.done()
+  }
+})
+
+test('pull moves a local branch to its upstream, checked out or not, and only forward', () => {
+  const r = repos()
+  try {
+    // Another clone moves main and feature on the remote
+    const other = join(r.root, 'other')
+    ok(r.root, ['clone', r.remote, other])
+    for (const branch of ['main', 'feature']) {
+      ok(other, ['switch', branch])
+      writeFileSync(join(other, `${branch}.txt`), 'remote\n')
+      ok(other, ['add', '.'])
+      ok(other, ['commit', '-m', `remote ${branch}`])
+      ok(other, ['push', 'origin', branch])
+    }
+    ok(r.work, git.fetchAll())
+    const upstreams = () => parseUpstreams(ok(r.work, ['for-each-ref', `--format=${UPSTREAM_FORMAT}`, 'refs/heads']))
+    assert.deepEqual(upstreams().main, { name: 'origin/main', ahead: 0, behind: 1 })
+    assert.equal(describeUpstream(upstreams().feature ?? { name: '', ahead: 0, behind: 0 }), '↓1 to pull · origin/feature')
+
+    // main is checked out: a fast-forward pull
+    ok(r.work, git.pullCurrent())
+    assert.equal(head(r.work), ok(r.work, ['rev-parse', 'origin/main']).trim())
+    // feature is not: fetched into, without a checkout and without touching the working tree
+    ok(r.work, git.pullOther('feature', 'origin/feature', ['origin']))
+    assert.equal(ok(r.work, ['rev-parse', 'feature']).trim(), ok(r.work, ['rev-parse', 'origin/feature']).trim())
+    assert.equal(branchOf(r.work), 'main')
+    assert.ok(isClean(r.work))
+    assert.deepEqual(upstreams().feature, { name: 'origin/feature', ahead: 0, behind: 0 })
+
+    // Diverged: both sides have a commit. Neither pull moves anything
+    r.commit('mine.txt', 'mine\n', 'local main')
+    ok(other, ['switch', 'main'])
+    writeFileSync(join(other, 'theirs.txt'), 'theirs\n')
+    ok(other, ['add', '.'])
+    ok(other, ['commit', '-m', 'remote main again'])
+    ok(other, ['push', 'origin', 'main'])
+    ok(r.work, git.fetchAll())
+    assert.deepEqual(upstreams().main, { name: 'origin/main', ahead: 1, behind: 1 })
+    const local = head(r.work)
+    assert.notEqual(run(r.work, git.pullCurrent()).code, 0)
+    assert.equal(head(r.work), local)
+    ok(r.work, git.switchTo('feature'))
+    ok(r.work, ['commit', '--allow-empty', '-m', 'local feature'])
+    ok(r.work, git.switchTo('main'))
+    ok(other, ['switch', 'feature'])
+    ok(other, ['commit', '--allow-empty', '-m', 'remote feature again'])
+    ok(other, ['push', 'origin', 'feature'])
+    ok(r.work, git.fetchAll())
+    const feature = ok(r.work, ['rev-parse', 'feature']).trim()
+    assert.notEqual(run(r.work, git.pullOther('feature', 'origin/feature', ['origin'])).code, 0)
+    assert.equal(ok(r.work, ['rev-parse', 'feature']).trim(), feature)
   } finally {
     r.done()
   }

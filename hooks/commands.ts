@@ -52,6 +52,16 @@ export const git = {
   deleteRemoteBranch: (remote: string, branch: string) => ['push', remote, '--delete', branch],
   fetchBranch: (remote: string, branch: string) => ['fetch', remote, branch],
   fetchAll: () => ['fetch', '--all', '--prune', '--tags'],
+  /** The checked-out branch moves to its upstream, fast-forward only. */
+  pullCurrent: () => ['pull', '--ff-only'],
+  /**
+   * Another local branch moves to its upstream without being checked out: fetch into it, which
+   * git allows only as a fast-forward.
+   */
+  pullOther: (local: string, upstream: string, remotes: string[]) => {
+    const { remote, branch } = splitRemote(upstream, remotes)
+    return ['fetch', remote, `${branch}:${local}`]
+  },
   stashPush: (message: string) => ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])],
   stash: (verb: 'apply' | 'pop' | 'drop', name: string) => ['stash', verb, name],
   stashBranch: (branch: string, name: string) => ['stash', 'branch', branch, name]
