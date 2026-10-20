@@ -1,0 +1,19 @@
+{
+  "name": "git-graph-claude",
+  "owner": {
+    "name": "Alvaro Muñoz",
+    "url": "https://github.com/alvaromunozmx"
+  },
+  "metadata": {
+    "description": "Git Graph for Claude Code: a branch and commit graph in a pane, with checkout, cherry-pick and more"
+  },
+  "plugins": [
+    {
+      "name": "git-graph",
+      "source": "./",
+      "description": "Git Graph in a pane: branches, tags, remotes and each commit's details and actions, refreshed after every turn.",
+      "version": "0.2.0",
+      "category": "productivity"
+    }
+  ]
+}

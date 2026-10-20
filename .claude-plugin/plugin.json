@@ -1,0 +1,28 @@
+{
+  "name": "git-graph",
+  "version": "0.2.0",
+  "description": "A Git Graph pane for Claude Code: branches, tags, remotes and each commit's details, refreshed after every turn.",
+  "author": {
+    "name": "Alvaro Muñoz",
+    "url": "https://github.com/alvaromunozmx"
+  },
+  "homepage": "https://github.com/alvaromunozmx/git-graph-claude",
+  "repository": "https://github.com/alvaromunozmx/git-graph-claude",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "graph",
+    "history",
+    "branches",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "limit": {
+      "type": "string",
+      "title": "Commits to show",
+      "description": "How many commits the graph loads.",
+      "default": "150"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+name: release
+
+# `npm version minor && git push --follow-tags` → a GitHub release with git-graph.zip attached
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run test:node
+      - run: npm run zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/git-graph.zip
+          generate_release_notes: true

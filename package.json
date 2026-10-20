@@ -1,0 +1,26 @@
+{
+  "name": "git-graph-claude",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A Git Graph pane for Claude Code",
+  "type": "module",
+  "license": "MIT",
+  "author": "Alvaro Muñoz (alvaromunozmx)",
+  "homepage": "https://github.com/alvaromunozmx/git-graph-claude#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvaromunozmx/git-graph-claude.git"
+  },
+  "keywords": ["claude-code", "claude-code-plugin", "claude-code-mod", "git", "git-graph"],
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "test": "npm run test:node && npm run test:mod",
+    "test:node": "node --experimental-strip-types --test test/graph.test.ts",
+    "test:mod": "claude plugin test .",
+    "validate": "claude plugin validate .",
+    "zip": "node scripts/zip.mjs",
+    "version": "node scripts/sync-version.mjs && git add .claude-plugin"
+  }
+}
