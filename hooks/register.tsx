@@ -17,9 +17,12 @@
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow; stashes
 //   fork off the commit they were made on, to apply, pop, drop or branch from.
-// - The settings (lanes, avatars, columns, date format, what is dim) are kept between sessions.
-// - Keys, while the pane has the focus: j and k walk the commits, h goes to HEAD, s finds,
-//   f fetches, r reloads; Esc closes the pane.
+// - The settings (lanes, columns, avatars, date format, what is dim) are kept between sessions;
+//   ⚙ opens them as a panel, a line per group.
+// - Keys, while the pane has the focus: j and k walk the commits (↓ ↑ in the header), h goes to
+//   HEAD (the branch name), s finds (⌕), f fetches, r reloads; Esc closes the pane. The settings
+//   list them; the Buttons they press stay in the header, since a hotkey needs its Button drawn.
+// - A success is a toast; the line under the header keeps errors and what is under way.
 // - Where the surface draws SVG (desktop), the lanes are curves, an SVG per row; the terminal
 //   draws them with box-drawing glyphs, which join there.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
@@ -109,6 +112,8 @@ const PANEL_ROWS = 200
 const LANE_DOWN = Array.from({ length: PANEL_ROWS }, () => '│').join('\n')
 // An avatar and the space after it
 const AVATAR_WIDTH = 3
+// The settings' group names, in a column of their own
+const SETTING_LABEL_WIDTH = 8
 
 let limit = 150
 let isOpen = false
@@ -352,14 +357,12 @@ async function readComparison ($: Engine, graph: Graph, base: string, hash: stri
 /** Marks this commit to compare others with, or stops comparing when it is the one marked. */
 async function toggleCompare ($: Engine, hash: string) {
   const base = await read($, COMPARE)
+  // The header's comparing line says so: no note repeats it
   await $.state.set(COMPARE_REF, base === hash ? null : hash)
-  if (base !== hash) await note($, 'info', `comparing with ${hash === WORKTREE ? 'the working tree' : hash.slice(0, HASH_WIDTH)}: open another commit`)
-  else await $.state.set(NOTE_REF, null)
 }
 
 async function stopComparing ($: Engine) {
   await $.state.set(COMPARE_REF, null)
-  await $.state.set(NOTE_REF, null)
   const selected = await read($, SELECTED)
   if (selected) {
     await $.state.set(DIFF_REF, null)
@@ -578,8 +581,13 @@ async function toggleMuteOthers ($: Engine) {
   await saveSettings($)
 }
 
+/**
+ * Says how an action went. A success is a toast alone: the pane already shows what it changed (the
+ * branch in the header, a new row), so a line under the header would only repeat it. An error stays
+ * there, with a toast too, until the next action; info (fetching…, asked Claude) only there.
+ */
 async function note ($: Engine, kind: Note['kind'], text: string) {
-  await $.state.set(NOTE_REF, { kind, text })
+  await $.state.set(NOTE_REF, kind === 'ok' ? null : { kind, text })
   if (kind !== 'info') $.ui.toast(`Git Graph · ${text}`)
 }
 
@@ -1007,6 +1015,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const found = query === '' ? graph?.commits ?? [] : (graph?.commits ?? []).filter(commit => matches(commit, query))
   const matching = found.length
 
+  const isDrawn = graph !== null && !graph.error
   const header = (
     <Box key="header" flexDirection="column">
       {Select && graph && graph.repos.length > 1 && (
@@ -1018,14 +1027,20 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           onSelect={(value: string) => pickRepo($, value)}
         />
       )}
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text wrap="truncate-end">
-          <Text color="green">{graph?.branch ? `⎇ ${graph.branch}` : 'Git Graph'}</Text>
-          {graph && graph.changes.length > 0 && <Text color="yellow">{`  ● ${graph.changes.length} uncommitted`}</Text>}
-          <Text dimColor>{graph && !graph.error ? `  ·  ${count} commits${count >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
-        </Text>
-        <Box flexDirection="row" columnGap={2}>
-          <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
+      {/* Where the repo stands on the left, what changes the view on the right; a narrow pane wraps the two */}
+      <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap={2}>
+        <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={1}>
+          {/* The branch is h: it opens the commit HEAD points at. j and k walk from there; they are drawn
+              here, always, because a Button's hotkey only answers while the Button is drawn */}
+          {graph?.branch
+            ? <Button key="head" hotkey="h" plain onPress={() => goHead($)}><Text color="green" bold>{`⎇ ${graph.branch}`}</Text></Button>
+            : <Text bold>Git Graph</Text>}
+          {graph && graph.changes.length > 0 && <Text color="yellow">{`● ${graph.changes.length} uncommitted`}</Text>}
+          {isDrawn && <Text dimColor>{`${count} commits${count >= limit ? ` (last ${limit})` : ''}`}</Text>}
+          {isDrawn && <Button key="previous" label="↑" hotkey="k" plain dimColor onPress={() => step($, -1)} />}
+          {isDrawn && <Button key="next" label="↓" hotkey="j" plain dimColor onPress={() => step($, 1)} />}
+        </Box>
+        <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={0}>
           {Select && graph && graph.branches.length > 0
             ? (
               <Select
@@ -1044,36 +1059,25 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               )
             : <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />}
           {graph && graph.remotes.length > 0 && <Button key="fetch" label="⇣ fetch" hotkey="f" plain dimColor onPress={() => fetchAll($)} />}
-          <Button key="reload" label="↻" hotkey="r" plain onPress={() => reload($)} />
+          <Button key="reload" label="↻" hotkey="r" plain dimColor onPress={() => reload($)} />
+          <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
         </Box>
       </Box>
-      {ui.Input && graph && !graph.error && (
-        <Box flexDirection="row" columnGap={2}>
+      {Input && isDrawn && (
+        <Box flexDirection="row" columnGap={1} alignItems="center">
+          {/* The magnifier is s: it puts the focus in the field */}
+          <Button key="focus-find" label="⌕" hotkey="s" plain dimColor onPress={() => focusFind($)} />
           <Box flexGrow={1}>
-            <Input key="find" label="⌕ " placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
+            <Input key="find" placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
           </Box>
           {query !== '' && <Text dimColor>{`${matching} ${matching === 1 ? 'match' : 'matches'}`}</Text>}
           {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
         </Box>
       )}
-      {settingsOpen && (
-        <Box key="settings-row" flexDirection="row" columnGap={2} flexWrap="wrap">
-          <Text dimColor>lanes:</Text>
-          <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />
-          {ui.Svg && <Button key="curves" label={curves ? 'curves' : 'glyphs'} plain onPress={() => toggleCurves($)} />}
-          <Text dimColor>columns:</Text>
-          <Button key="show-author" label={`${showAuthor ? '☑' : '☐'} author`} plain onPress={() => toggleShowAuthor($)} />
-          <Button key="avatars" label={`${avatars ? '☑' : '☐'} avatars`} plain onPress={() => toggleAvatars($)} />
-          <Button key="show-date" label={`${showDate ? '☑' : '☐'} date`} plain onPress={() => toggleShowDate($)} />
-          <Button key="date-format" label={`date: ${dateFormat}`} plain onPress={() => cycleDateFormat($)} />
-          <Text dimColor>dim:</Text>
-          <Button key="mute-merges" label={`${muteMerges ? '☑' : '☐'} merge commits`} plain onPress={() => toggleMuteMerges($)} />
-          <Button key="mute-others" label={`${muteOthers ? '☑' : '☐'} commits HEAD does not reach`} plain onPress={() => toggleMuteOthers($)} />
-        </Box>
-      )}
+      {settingsOpen && drawSettings(ui, $, { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers, canFetch: Boolean(graph && graph.remotes.length > 0) })}
       {compareBase !== null && (
         <Box flexDirection="row" columnGap={2}>
-          <Text color="cyan" wrap="truncate-end">{`⇄ comparing with ${compareBase === WORKTREE ? 'the working tree' : compareBase.slice(0, HASH_WIDTH)}`}</Text>
+          <Text wrap="truncate-end"><Text color="cyan">{`⇄ comparing with ${compareBase === WORKTREE ? 'the working tree' : compareBase.slice(0, HASH_WIDTH)}`}</Text><Text dimColor>  · open another commit</Text></Text>
           <Button key="compare-stop" label="✕ stop comparing" plain dimColor onPress={() => stopComparing($)} />
         </Box>
       )}
@@ -1135,14 +1139,49 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>{`${start + 1}–${end} of ${found.length}`}</Text>
         </Box>
       )}
-      <Text> </Text>
-      <Box key="keys" flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="next" label="next" hotkey="j" plain dimColor onPress={() => step($, 1)} />
-        <Button key="previous" label="previous" hotkey="k" plain dimColor onPress={() => step($, -1)} />
-        <Button key="head" label="HEAD" hotkey="h" plain dimColor onPress={() => goHead($)} />
-        {Input && <Button key="focus-find" label="find" hotkey="s" plain dimColor onPress={() => focusFind($)} />}
-        <Text dimColor>esc: close</Text>
-      </Box>
+    </Box>
+  )
+}
+
+/**
+ * The settings, as a panel under the header: a line per group, its name in a dim column of its
+ * own. Keys is a reference only: the Buttons the keys press stay in the header, drawn always.
+ */
+function drawSettings (
+  ui: Ui, $: Engine,
+  { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers, canFetch }: { compact: boolean; curves: boolean; avatars: boolean; showAuthor: boolean; showDate: boolean; dateFormat: DateFormat; muteMerges: boolean; muteOthers: boolean; canFetch: boolean }
+) {
+  const { Box, Button, Text } = ui
+  const check = (isOn: boolean, label: string) => `${isOn ? '☑' : '☐'} ${label}`
+  const keys = ['j next', 'k previous', 'h HEAD', ...(ui.Input ? ['s find'] : []), ...(canFetch ? ['f fetch'] : []), 'r reload', 'esc close']
+  return (
+    <Box key="settings-panel" flexDirection="column" marginTop={1} borderStyle="round" borderColor="gray" paddingX={1}>
+      {drawSetting(ui, 'lanes', 'Lanes', [
+        <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />,
+        ui.Svg && <Button key="curves" label={curves ? 'curves' : 'glyphs'} plain onPress={() => toggleCurves($)} />
+      ])}
+      {drawSetting(ui, 'columns', 'Columns', [
+        <Button key="show-author" label={check(showAuthor, 'author')} plain onPress={() => toggleShowAuthor($)} />,
+        <Button key="avatars" label={check(avatars, 'avatars')} plain onPress={() => toggleAvatars($)} />,
+        <Button key="show-date" label={check(showDate, 'date')} plain onPress={() => toggleShowDate($)} />,
+        <Button key="date-format" label={`date: ${dateFormat}`} plain onPress={() => cycleDateFormat($)} />
+      ])}
+      {drawSetting(ui, 'dim', 'Dim', [
+        <Button key="mute-merges" label={check(muteMerges, 'merge commits')} plain onPress={() => toggleMuteMerges($)} />,
+        <Button key="mute-others" label={check(muteOthers, 'commits HEAD does not reach')} plain onPress={() => toggleMuteOthers($)} />
+      ])}
+      {drawSetting(ui, 'keys', 'Keys', [<Text key="keys-help" dimColor>{keys.join(' · ')}</Text>])}
+    </Box>
+  )
+}
+
+/** One group of the settings: its name, then its controls. The Box key is prefixed, so it never meets a Button's. */
+function drawSetting (ui: Ui, key: string, label: string, controls: unknown[]) {
+  const { Box, Text } = ui
+  return (
+    <Box key={`setting-${key}`} flexDirection="row" columnGap={1}>
+      <Box width={SETTING_LABEL_WIDTH} flexShrink={0}><Text dimColor>{label}</Text></Box>
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap" flexShrink={1}>{controls.filter(Boolean)}</Box>
     </Box>
   )
 }

@@ -29,19 +29,21 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 ## Use
 
 - `/git-graph` opens the pane: commits laid out in lanes, with the checked-out branch, local and remote branches and tags (◆) as badges, plus author, date and hash. It adapts to the pane's width.
-- The header shows the current branch and how many files have uncommitted changes.
-- **⌕ find** keeps only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
+- **The header** reads in one line: on the left the current branch (`⎇ main`, click it or press `h` to open the commit HEAD points at), how many files have uncommitted changes, how many commits are drawn, and **↑ ↓** to walk them; on the right the branch picker, **⇣ fetch**, **↻** and **⚙ settings**. A narrow pane wraps the right side under the left.
+- A finished action (checkout, merge, push…) says so in a toast, since the pane already shows what it changed. The line under the header keeps errors, until the next action, and what is under way (`fetching…`).
+- **⌕** and the find field keep only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
 - **Stashes** (◈) fork off the commit they were made on, while every branch is drawn. Open one to **apply** it, **pop** it, make a **branch…** from it or **drop** it.
-- **⚙ settings** opens the settings row, kept between sessions:
-  - lanes: **spaced / compact** (with a gap, or side by side) and **curves / glyphs** (in Claude Desktop the lanes are SVG curves and dots by default, like Git Graph; the terminal draws them with box-drawing glyphs).
-  - columns: **author**, **avatars** (each author's initials on their own color; real pictures would need network access the pane does not have), **date**, and the date as **absolute** (`19 Oct 2026 10:00`), **relative** (`3 hours ago`) or **iso** (`2026-10-19 10:00`).
-  - dim: **merge commits** (on by default, like Git Graph) and **commits HEAD does not reach**.
+- **⚙ settings** opens the settings, kept between sessions, as a panel with a line per group:
+  - **Lanes**: **spaced / compact** (with a gap, or side by side) and **curves / glyphs** (in Claude Desktop the lanes are SVG curves and dots by default, like Git Graph; the terminal draws them with box-drawing glyphs).
+  - **Columns**: **author**, **avatars** (each author's initials on their own color; real pictures would need network access the pane does not have), **date**, and the date as **absolute** (`19 Oct 2026 10:00`), **relative** (`3 hours ago`) or **iso** (`2026-10-19 10:00`).
+  - **Dim**: **merge commits** (on by default, like Git Graph) and **commits HEAD does not reach**.
+  - **Keys**: the keys below, as a reminder.
 - **The repo picker** appears when the repo has submodules checked out: pick one to draw its history, with every action working there.
 - **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
-- **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit (turning the page at its edges; with none open, the first of the page), `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
+- **Keys**, while the pane has the focus: `j` and `k` (**↓ ↑**) open the next and the previous commit (turning the page at its edges; with none open, the first of the page), `h` (the branch name) the one HEAD points at, `s` (**⌕**) goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons. The settings list them.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; **pull from origin/…** moves it to its upstream, fast-forward only, checked out or not, and a line says what a push and a pull would move (`↑1 to push, ↓2 to pull · origin/main`).
   - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
