@@ -645,6 +645,22 @@ test('a repo with submodules gets a repo picker that draws each one', async ($, 
   }
 })
 
+test('a repo with more branches than a picker takes still draws, its picker cut to 64 options', async ($, on) => {
+  const many = Array.from({ length: 100 }, (_, i) => `refs/heads/topic-${String(i).padStart(3, '0')}`).join('\n')
+  world(on, { 'for-each-ref': args => (args[0]?.includes('upstream') ? '' : `refs/heads/main\n${many}\n`) })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
+    await ui.select({ key: 'branches', value: 'ref:topic-050' })
+    const options = (await ui.find({ key: 'branches' }))?.props.options as { value: string; label: string }[]
+    expect(options.length).toBe(64)
+    expect((await ui.find({ key: 'branches' }))?.props.value).toBe('ref:topic-050')
+    expect(options.at(-1)?.label).toMatch(/^… \d+ more branches$/)
+    await ui.select({ key: 'branches', value: 'all' })
+  }
+})
+
 test('a repo with no submodule has no repo picker', async ($, on) => {
   world(on)
   await $.command.run(typed(''))

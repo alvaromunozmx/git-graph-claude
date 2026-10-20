@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, repoCandidates, repoNamed, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, fitOptions, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, repoCandidates, repoNamed, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 /** The segments an SVG strokes in one color. */
 const strokeOf = (svg: string, color: string) => svg.match(new RegExp(`<path stroke="${color}" d="([^"]*)"`))?.[1] ?? ''
@@ -210,6 +210,16 @@ test('a folder of repos: its own folders, by name, hidden ones and dependencies 
   ]
   assert.deepEqual(repoCandidates(entries), ['fleet-hub-admin', 'fleet-hub-api'])
   assert.deepEqual(repoCandidates([]), [])
+})
+
+test('a picker takes at most 64 options: the rest are counted, and the one selected stays', () => {
+  const options = Array.from({ length: 100 }, (_, i) => ({ value: `ref:b${i}`, label: `b${i}` }))
+  assert.equal(fitOptions(options.slice(0, 64), undefined, 'branches').length, 64)
+  const fitted = fitOptions(options, 'ref:b90', 'branches')
+  assert.equal(fitted.length, 64)
+  assert.deepEqual(fitted.at(-2), { value: 'ref:b90', label: 'b90' })
+  assert.deepEqual(fitted.at(-1), { value: 'sep:more', label: '… 37 more branches' })
+  assert.deepEqual(fitOptions(options, 'ref:b3', 'branches').slice(0, 4).map(option => option.label), ['b0', 'b1', 'b2', 'b3'])
 })
 
 test('/git-graph <name> finds a repo by its label, whatever its case', () => {

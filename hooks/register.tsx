@@ -30,7 +30,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
 import { checkoutCommit, checkoutRemote, git as cmd, splitRemote } from './commands'
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, describeUpstream, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, parseUpstreams, pullRequestUrl, repoCandidates, repoNamed, SEP, SIGNATURE_FORMAT, splitBranches, splitMatch, STASH_FORMAT, summary, UPSTREAM_FORMAT, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, describeUpstream, FORMAT, fitOptions, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, parseUpstreams, pullRequestUrl, repoCandidates, repoNamed, SEP, SIGNATURE_FORMAT, splitBranches, splitMatch, STASH_FORMAT, summary, UPSTREAM_FORMAT, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -1083,8 +1083,10 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           key="repo"
           label="repo "
           value={repo ?? (graph.inFolder ? undefined : graph.repos[0]?.path)}
-          options={graph.repos.map(item => ({ value: item.path, label: item.label }))}
-          onSelect={(value: string) => pickRepo($, value, { inFolder: Boolean(graph.inFolder), own: graph.repos[0]?.path })}
+          options={fitOptions(graph.repos.map(item => ({ value: item.path, label: item.label })), repo ?? undefined, 'repos')}
+          onSelect={(value: string) => (value.startsWith('sep:')
+            ? read($, PICKER_REDRAW).then(count => $.state.set(PICKER_REDRAW_REF, count + 1))
+            : pickRepo($, value, { inFolder: Boolean(graph.inFolder), own: graph.repos[0]?.path }))}
         />
       )}
       {/* Where the repo stands on the left, what changes the view on the right; a narrow pane wraps the two */}
@@ -1101,14 +1103,14 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               <Select
                 key="branches"
                 value={filter !== null ? `ref:${filter}` : allBranches ? 'all' : 'current'}
-                options={[
+                options={fitOptions([
                   { value: 'all', label: 'all branches' },
                   { value: 'current', label: 'current branch' },
                   ...(graph.localCount > 0 ? [{ value: 'sep:local', label: '── local ──' }] : []),
                   ...graph.branches.slice(0, graph.localCount).map(name => ({ value: `ref:${name}`, label: name })),
                   ...(graph.branches.length > graph.localCount ? [{ value: 'sep:remote', label: '── remote ──' }] : []),
                   ...graph.branches.slice(graph.localCount).map(name => ({ value: `ref:${name}`, label: name }))
-                ]}
+                ], filter !== null ? `ref:${filter}` : undefined, 'branches')}
                 onSelect={(value: string) => pickBranches($, value)}
               />
               )
