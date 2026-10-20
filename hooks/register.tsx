@@ -12,7 +12,8 @@
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
 // - ⇣ fetch brings every remote's branches and tags, pruning the ones deleted there.
 // - A repo with submodules gets a repo picker: each submodule's history draws the same way.
-// - The branch picker draws every branch, the current one, or any one branch alone.
+// - The branch picker draws every branch, the current one, or any one branch alone, local
+//   branches listed apart from remote ones.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow; stashes
 //   fork off the commit they were made on, to apply, pop, drop or branch from.
@@ -26,7 +27,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
 import { checkoutCommit, checkoutRemote, git as cmd, splitRemote } from './commands'
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, describeUpstream, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, parseUpstreams, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitBranches, splitMatch, STASH_FORMAT, summary, UPSTREAM_FORMAT, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -45,6 +46,7 @@ const DIFF_REF = { plugin: 'git-graph', key: 'diff' } as const
 const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
 const REPO_REF = { plugin: 'git-graph', key: 'repo' } as const
+const PICKER_REDRAW_REF = { plugin: 'git-graph', key: 'pickerRedraw' } as const
 const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
@@ -70,6 +72,7 @@ const DIFF = atom(DIFF_REF, null)
 const ALL = atom(ALL_REF, true)
 const FILTER = atom(FILTER_REF, null)
 const REPO = atom(REPO_REF, null)
+const PICKER_REDRAW = atom(PICKER_REDRAW_REF, 0)
 const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
@@ -208,7 +211,9 @@ async function load ($: Engine) {
   let filter = await read($, FILTER)
   let graph: Graph
   try {
-    const branches = parseBranches(await git($, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes']).catch(() => ''))
+    const [local, remote] = splitBranches(await git($, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes']).catch(() => ''))
+    const branches = [...local, ...remote]
+    const upstreams = parseUpstreams(await git($, ['for-each-ref', `--format=${UPSTREAM_FORMAT}`, 'refs/heads']).catch(() => ''))
     // A picked branch that was deleted since: back to the branches the toggle says
     if (filter !== null && !branches.includes(filter)) {
       filter = null
@@ -243,6 +248,8 @@ async function load ($: Engine) {
       branch: branch.trim() || '(detached HEAD)',
       changes,
       branches,
+      localCount: local.length,
+      upstreams,
       remotes,
       head: headHash,
       forge,
@@ -253,7 +260,7 @@ async function load ($: Engine) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, defaultBranch: 'main', repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], localCount: 0, upstreams: {}, remotes: [], head: '', forge: null, defaultBranch: 'main', repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -465,6 +472,8 @@ async function pickRepo ($: Engine, path: string) {
 
 /** The branch picker's value: `all`, `current`, or `ref:<branch>` to draw that branch alone. */
 async function pickBranches ($: Engine, value: string) {
+  // A separator picks nothing: the picker draws again with what it showed
+  if (value.startsWith('sep:')) return $.state.set(PICKER_REDRAW_REF, (await read($, PICKER_REDRAW)) + 1)
   if (value === 'all' || value === 'current') {
     await $.state.set(ALL_REF, value === 'all')
     await $.state.set(FILTER_REF, null)
@@ -828,9 +837,13 @@ async function pullRef ($: Engine, ref: Ref) {
       await git($, cmd.fetchBranch(target.remote, target.branch), [0], 120000)
       await note($, 'ok', `fetched ${ref.name}`)
     } else {
-      // Only fast-forwards: a pull that would merge is Claude's to resolve
-      await git($, ['pull', '--ff-only'], [0], 120000)
-      await note($, 'ok', `pulled ${ref.name}`)
+      // Only fast-forwards: a pull that would merge is Claude's to resolve. A branch not checked
+      // out is fetched into, which moves it to its upstream without touching the working tree
+      const graph = await read($, GRAPH)
+      const upstream = graph?.upstreams[ref.name]
+      if (!upstream) return note($, 'error', `${ref.name} has no upstream to pull from: push it first`)
+      await git($, ref.kind === 'head' ? cmd.pullCurrent() : cmd.pullOther(ref.name, upstream.name, graph.remotes), [0], 120000)
+      await note($, 'ok', `${ref.name} is at ${upstream.name}`)
     }
   } catch (error) {
     await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
@@ -966,6 +979,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const allBranches = await read($, ALL)
   const filter = await read($, FILTER)
   const repo = await read($, REPO)
+  await read($, PICKER_REDRAW)
   const compact = await read($, COMPACT)
   const settingsOpen = await read($, SETTINGS)
   const muteMerges = await read($, MUTE_MERGES)
@@ -1009,7 +1023,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>{graph && !graph.error ? `  ·  ${count} commits${count >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
         </Text>
         <Box flexDirection="row" columnGap={2}>
-          <Button key="settings" label={settingsOpen ? '⚙ ▾' : '⚙'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
+          <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
           {Select && graph && graph.branches.length > 0
             ? (
               <Select
@@ -1018,7 +1032,10 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
                 options={[
                   { value: 'all', label: 'all branches' },
                   { value: 'current', label: 'current branch' },
-                  ...graph.branches.map(name => ({ value: `ref:${name}`, label: name }))
+                  ...(graph.localCount > 0 ? [{ value: 'sep:local', label: '── local ──' }] : []),
+                  ...graph.branches.slice(0, graph.localCount).map(name => ({ value: `ref:${name}`, label: name })),
+                  ...(graph.branches.length > graph.localCount ? [{ value: 'sep:remote', label: '── remote ──' }] : []),
+                  ...graph.branches.slice(graph.localCount).map(name => ({ value: `ref:${name}`, label: name }))
                 ]}
                 onSelect={(value: string) => pickBranches($, value)}
               />
@@ -1371,6 +1388,8 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
     <Button key={action} label={armed(action) ? refConfirmText(action, ref, graph) : label} plain dimColor={!armed(action)} onPress={() => armRef($, action, ref)} />
   )
   const hasRemote = graph.remotes.length > 0
+  // How the branch stands against its upstream: what a push and a pull would move
+  const upstream = isBranch ? graph.upstreams[ref.name] : undefined
   const actions = [
     <Button key="copy-name" label="⧉ copy name" plain onPress={() => copyText($, ref.name, ref.name)} />,
     pullRequest && <Link key="pull-request" href={pullRequest} label={`↗ pull request into ${graph.defaultBranch}`} />,
@@ -1379,7 +1398,7 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
     !isCurrent && ref.kind !== 'tag' && guarded('rebase-ref', '⇡ rebase current onto this'),
     isBranch && Input && <Button key="rename" label="✎ rename…" plain dimColor onPress={() => $.state.set(RENAMING_REF, isRenaming ? null : ref.name)} />,
     isBranch && hasRemote && guarded('push-ref', '⇡ push'),
-    isCurrent && hasRemote && <Button key="pull" label="⇣ pull" plain dimColor onPress={() => pullRef($, ref)} />,
+    upstream && <Button key="pull" label={`⇣ pull from ${upstream.name}`} plain dimColor={upstream.behind === 0} onPress={() => pullRef($, ref)} />,
     ref.kind === 'remote' && <Button key="fetch-ref" label="⇣ fetch" plain dimColor onPress={() => pullRef($, ref)} />,
     ref.kind === 'local' && guarded(armed('force-delete-branch') ? 'force-delete-branch' : 'delete-branch', '✕ delete'),
     ref.kind === 'remote' && guarded('delete-remote-branch', '✕ delete on remote'),
@@ -1390,6 +1409,7 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
   return (
     <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
       <Text color={REF_COLOR[ref.kind]} wrap="truncate-end">{`${ref.kind === 'tag' ? '◆ tag' : ref.kind === 'remote' ? 'remote branch' : isCurrent ? 'current branch' : 'branch'} ${ref.name}`}</Text>
+      {upstream && <Text color={upstream.behind > 0 || upstream.isGone ? 'yellow' : 'gray'} wrap="truncate-end">{describeUpstream(upstream)}</Text>}
       <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
       {isRenaming && Input && (
         <Input key="rename-branch" label="✎ " value={ref.name} submitLabel="rename" autoFocus onSubmit={(value: string) => renameBranch($, ref.name, value)} />

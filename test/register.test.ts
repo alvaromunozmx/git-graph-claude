@@ -21,7 +21,10 @@ type Repo = Record<string, Answer | ((args: string[]) => Answer)>
 
 const REPO: Repo = {
   remote: 'origin\n',
-  'for-each-ref': 'refs/heads/main\nrefs/heads/feature\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\n',
+  // Branches, or (asked with an upstream format) each local branch's upstream and track
+  'for-each-ref': args => (args[0]?.includes('upstream')
+    ? 'main\torigin/main\t\nfeature\torigin/feature\t[ahead 1, behind 2]\n'
+    : 'refs/heads/main\nrefs/heads/feature\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\n'),
   branch: 'main\n',
   'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'b2\n'),
   status: '',
@@ -215,7 +218,10 @@ test('the branch picker draws one branch alone, or all of them again', async ($,
     const ui = await mount($, surface)
     const picker = await ui.find({ key: 'branches' })
     expect(picker?.props.value).toBe('all')
-    expect((picker?.props.options as { value: string }[]).map(option => option.value)).toEqual(['all', 'current', 'ref:main', 'ref:feature', 'ref:origin/main'])
+    expect((picker?.props.options as { value: string; label?: string }[]).map(option => option.label)).toEqual(['all branches', 'current branch', '── local ──', 'main', 'feature', '── remote ──', 'origin/main'])
+    // A separator picks nothing
+    await ui.select({ key: 'branches', value: 'sep:remote' })
+    expect((await ui.find({ key: 'branches' }))?.props.value).toBe('all')
     await ui.select({ key: 'branches', value: 'ref:feature' })
     expect(seen.git.findLast(args => args[0] === 'log')?.[1]).toBe('feature')
     expect((await ui.find({ key: 'branches' }))?.props.value).toBe('ref:feature')
@@ -332,6 +338,7 @@ test('the current branch pulls, and offers no checkout', async ($, on) => {
   await ui.press({ key: 'ref-head-main' })
   expect(await ui.find({ type: 'Text', text: 'current branch main' })).toBeDefined()
   expect(await ui.find({ key: 'checkout-ref' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'in step with origin/main' })).toBeDefined()
   await ui.press({ key: 'pull' })
   expect(seen.git.findLast(args => args[0] === 'pull')).toEqual(['pull', '--ff-only'])
 })
@@ -733,4 +740,26 @@ test('an open commit keeps the lanes going beside its panel', async ($, on) => {
   // The last commit has nothing below it: no lanes beside its panel
   await terminal.press({ key: 'hash-a1' })
   expect(await terminal.findAll({ type: 'Text', text: /^│\n│/ })).toHaveLength(0)
+})
+
+test('a local branch not checked out pulls from its upstream without a checkout', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'ref-local-feature' })
+    expect(await ui.find({ type: 'Text', text: '↑1 to push, ↓2 to pull · origin/feature' })).toBeDefined()
+    expect((await ui.find({ key: 'pull' }))?.props.label).toBe('⇣ pull from origin/feature')
+    await ui.press({ key: 'pull' })
+    expect(seen.git.findLast(args => args[0] === 'fetch')).toEqual(['fetch', 'origin', 'feature:feature'])
+    await ui.press({ key: 'ref-local-feature' })
+  }
+})
+
+test('a branch with no upstream offers no pull', async ($, on) => {
+  world(on, { 'for-each-ref': args => (args[0]?.includes('upstream') ? 'main\torigin/main\t\n' : 'refs/heads/main\nrefs/heads/feature\n') })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'ref-local-feature' })
+  expect(await ui.find({ key: 'pull' })).toBeUndefined()
 })
