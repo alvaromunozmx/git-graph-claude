@@ -1,4 +1,6 @@
 // The lane layout, checked against small histories with known shapes.
+// Run by Node (`npm run test:node`); named outside *.test.ts so `claude plugin test`, which
+// allows only relative and "claude-code" imports, does not load it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
