@@ -2,14 +2,27 @@
 
 A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your branches, tags and remotes laid out in lanes, like the VS Code extension, next to the conversation.
 
+<img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src=".github/screenshot.png" />
+
 ## Install
+
+In a terminal session:
 
 ```text
 /plugin marketplace add alvaromunozmx/git-graph-claude
 /plugin install git-graph@git-graph-claude
 ```
 
-Or, in Claude Desktop, download `git-graph.zip` from the [latest release](https://github.com/alvaromunozmx/git-graph-claude/releases/latest) and upload it in Settings → Plugins → Upload a plugin.
+Or from a shell:
+
+```text
+claude plugin marketplace add alvaromunozmx/git-graph-claude
+claude plugin install git-graph@git-graph-claude
+```
+
+In Claude Desktop's Code tab, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `alvaromunozmx/git-graph-claude`, then **Add plugin**. A plugin installed from a terminal at the user scope loads there too.
+
+Don't upload `git-graph.zip` in Settings → Plugins → Upload a plugin: that reaches Cowork, not the Code tab.
 
 Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 
