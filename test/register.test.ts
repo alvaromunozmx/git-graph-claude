@@ -444,7 +444,7 @@ test('two commits compare: the files and diffs from the older to the newer', asy
     expect(await ui.find({ type: 'Text', text: '⇄ comparing with b2' })).toBeDefined()
     await ui.press({ key: 'hash-a1' })
     expect(await ui.find({ type: 'Text', text: '2 files changed from a1 to b2' })).toBeDefined()
-    expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--name-status', '-M', 'a1', 'b2'])
+    expect(seen.git.findLast(args => args[0] === 'diff' && args[1] === '--name-status')).toEqual(['diff', '--name-status', '-M', 'a1', 'b2'])
     await ui.press({ key: 'file-old.ts' })
     expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '-M', 'a1', 'b2', '--', 'old.ts'])
     await ui.press({ key: 'compare-stop' })
@@ -462,5 +462,19 @@ test('the working tree compares with a commit', async ($, on) => {
   await ui.press({ key: 'compare' })
   await ui.press({ key: 'hash-worktree' })
   expect(await ui.find({ type: 'Text', text: '1 file changed from a1 to the working tree' })).toBeDefined()
-  expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--name-status', '-M', 'a1'])
+  expect(seen.git.findLast(args => args[0] === 'diff' && args[1] === '--name-status')).toEqual(['diff', '--name-status', '-M', 'a1'])
+})
+
+test('each file shows the lines it added and deleted, and the commit its totals', async ($, on) => {
+  world(on, { 'diff-tree': args => (args.includes('--numstat') ? '10\t2\thooks/register.tsx\n-\t-\tlogo.png\n' : 'M\thooks/register.tsx\nA\tlogo.png\n') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    expect(await ui.find({ type: 'Text', text: 'Alvaro <a@b.c> · 19 Oct 2026 10:00  ·  2 files changed, +10 −2' })).toBeDefined()
+    const file = await ui.find({ key: 'file-hooks/register.tsx' })
+    expect(file?.text).toContain('+10')
+    expect(file?.text).toContain('−2')
+    expect((await ui.find({ key: 'file-logo.png' }))?.text).toContain('binary')
+    await ui.press({ key: 'hash-b2' })
+  }
 })
