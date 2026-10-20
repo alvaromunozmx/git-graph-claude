@@ -52,8 +52,13 @@ export type Graph = {
   forge: Forge | null
   /** The branch the first remote's HEAD names, which pull requests go into */
   defaultBranch: string
-  /** The session's repo and its submodules, for the repo picker: absolute paths */
+  /**
+   * The repos the repo picker offers, as absolute paths: the session's repo and its submodules; or,
+   * where the session's folder is no repo, the repos in its folders, each followed by its submodules
+   */
   repos: { path: string; label: string }[]
+  /** The session's folder is no repo: `repos` is what its folders hold, and one has to be picked */
+  inFolder?: true
   error: string | null
   loadedAt: number
 }
@@ -107,7 +112,7 @@ declare module 'claude-code' {
       detail: Detail
       diff: Diff
       allBranches: boolean
-      /** The repo drawn: a submodule's absolute path; null: the session's own */
+      /** The repo drawn, as an absolute path; null: the session's own, or, in a folder of repos, none picked yet */
       repo: string | null
       /** Counts the picks of a separator in the branch picker, so the picker draws again */
       pickerRedraw: number

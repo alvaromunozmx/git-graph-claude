@@ -68,6 +68,23 @@ export function parseSubmodules (stdout: string): string[] {
   }).filter(Boolean)
 }
 
+/**
+ * A folder's entries → the folders in it that may each be a repo, by name: not hidden (`.claude`,
+ * `.vscode`) and not dependencies (`node_modules`). Whether one is a repo is its `.git`'s to say.
+ */
+export function repoCandidates (entries: readonly { name: string; kind: string }[]): string[] {
+  return entries
+    .filter(entry => entry.kind === 'dir' && !entry.name.startsWith('.') && entry.name !== 'node_modules')
+    .map(entry => entry.name)
+    .sort((a, b) => a.localeCompare(b))
+}
+
+/** The repo `/git-graph <name>` names, by its label in the repo picker, whatever its case. */
+export function repoNamed<T extends { label: string }> (repos: readonly T[], name: string): T | undefined {
+  const wanted = name.trim().toLowerCase()
+  return repos.find(repo => repo.label.toLowerCase() === wanted)
+}
+
 /** What a commit's detail asks git for its signature: status, signer, fingerprint. */
 export const SIGNATURE_FORMAT = ['%G?', '%GS', '%GK'].join('%x1f')
 

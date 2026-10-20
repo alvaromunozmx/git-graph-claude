@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, repoCandidates, repoNamed, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 /** The segments an SVG strokes in one color. */
 const strokeOf = (svg: string, color: string) => svg.match(new RegExp(`<path stroke="${color}" d="([^"]*)"`))?.[1] ?? ''
@@ -197,6 +197,26 @@ test('a line passing through a join keeps going, in its own color, to the commit
 
 test('submodules checked out are listed, the ones not initialized left out', () => {
   assert.deepEqual(parseSubmodules(' 1a2b lib/core (heads/main)\n+5e6f vendor/x (v1)\n-3c4d lib/unused\nU7a8b broken\n'), ['lib/core', 'vendor/x', 'broken'])
+})
+
+test('a folder of repos: its own folders, by name, hidden ones and dependencies left out', () => {
+  const entries = [
+    { name: 'fleet-hub-api', kind: 'dir' },
+    { name: '.claude', kind: 'dir' },
+    { name: 'README.md', kind: 'file' },
+    { name: 'fleet-hub-admin', kind: 'dir' },
+    { name: 'node_modules', kind: 'dir' },
+    { name: 'shortcut', kind: 'other' }
+  ]
+  assert.deepEqual(repoCandidates(entries), ['fleet-hub-admin', 'fleet-hub-api'])
+  assert.deepEqual(repoCandidates([]), [])
+})
+
+test('/git-graph <name> finds a repo by its label, whatever its case', () => {
+  const repos = [{ path: '/baf/fleet-hub-api', label: 'fleet-hub-api' }, { path: '/baf/fleet-hub-api/lib/core', label: 'fleet-hub-api/lib/core' }]
+  assert.equal(repoNamed(repos, 'Fleet-Hub-API ')?.path, '/baf/fleet-hub-api')
+  assert.equal(repoNamed(repos, 'fleet-hub-api/lib/core')?.path, '/baf/fleet-hub-api/lib/core')
+  assert.equal(repoNamed(repos, 'fleet'), undefined)
 })
 
 test('a branch opens a pull request on its forge, never into itself', () => {

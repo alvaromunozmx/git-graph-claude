@@ -11,7 +11,7 @@ A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your br
 ## Requirements
 
 - **Claude Code 2.1.287 or later in the terminal, or 2.1.286 or later in Claude Desktop's Code tab.** Git Graph is a *mod*: a plugin with a hooks module, and Claude Code runs mods by default from those versions (`/status` in the Code tab shows its version). It is tested on 2.1.299 (Claude Desktop) and 2.1.304 (terminal). Mods don't load under `--safe-mode`, with `"disableAllHooks": true` in your settings, or where your organization lets only its own mods load: then the plugin installs but `/git-graph` does not appear.
-- **git** on the `PATH`, and a folder inside a git repository (submodules are picked from the repo picker).
+- **git** on the `PATH`, and a folder inside a git repository, or a folder that holds repositories one level down (picked from the repo picker).
 - **Claude Desktop's Code tab or the Claude Code terminal.** It is not tested in Cowork.
 - Nothing else to install: no Node, no build step. Node 22.6+ is only needed to develop it (see Development).
 
@@ -56,7 +56,10 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **Lanes**: **spaced / compact** (with a gap, or side by side) and **curves / glyphs** (in Claude Desktop the lanes are SVG curves and dots by default, like Git Graph; the terminal draws them with box-drawing glyphs).
   - **Columns**: **author**, **avatars** (each author's initials on their own color; real pictures would need network access the pane does not have), **date**, and the date as **absolute** (`19 Oct 2026 10:00`), **relative** (`3 hours ago`) or **iso** (`2026-10-19 10:00`).
   - **Dim**: **merge commits** (on by default, like Git Graph) and **commits HEAD does not reach**.
-- **The repo picker** appears when the repo has submodules checked out: pick one to draw its history, with every action working there.
+- **The repo picker** appears when there is more than one repo to draw, and switches between them at any time, with every action working in the one drawn:
+  - in a repo with submodules checked out: the repo and each submodule.
+  - in a folder that is no repo but holds several, one level down (a workspace like `projects/api`, `projects/web`): each of them, with its own submodules under it. Hidden folders and `node_modules` are skipped. The first time, the pane lists them as buttons to pick one; after that it draws the one picked last in that folder. A folder with a single repo draws it straight away.
+  - `/git-graph <repo>` opens the pane on that repo, by the name the picker shows (`/git-graph api`).
 - **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
@@ -136,12 +139,13 @@ It is a Claude Code *mod*: [`hooks/register.tsx`](hooks/register.tsx) registers 
 Like every mod, Git Graph runs on your machine with your permissions. It has no server and no telemetry, and makes no network request of its own. `claude plugin validate .` lists every hook it registers and every call it makes.
 
 - **git.** Everything it shows and does is a `git -C <repo> …` command, run with `GIT_TERMINAL_PROMPT=0` so git never waits for a password. It reads (`log`, `status`, `diff`, `show`, `branch`, `tag`, `stash list`, `remote`…) when the pane opens, when you press **↻** and when Claude finishes a turn. It changes the repo only when you press a button, and checkout, merge, rebase, cherry-pick, revert, reset, push, pop and every delete wait for a second, confirming press. Every command that changes the repo or a remote is in [`hooks/commands.ts`](hooks/commands.ts).
+- **Folders.** Where the session's folder is no repo, it lists that folder's own folders through Claude Code's file API and checks which ones have a `.git`, one level down, to find the repos it holds. It reads nothing else there.
 - **Network.** Only git reaches the network, and only when you press **fetch**, **pull**, **push**, **push tag** or **delete on remote**: to the remotes your repo already has, with the credentials git already uses.
 - **Other programs.** **copy hash**, **copy subject** and **copy name** run `uname -s` to tell the system, then its clipboard program with the text on standard input: `pbcopy` on macOS, `wl-copy`, `xclip -selection clipboard` or `xsel --clipboard --input` on Linux (the first one there), `clip` on Windows. No shell runs, and the text stays on your machine. Nothing else runs besides git.
 - **Prompts to Claude.** Two buttons send Claude a prompt in the current session, as if you had typed it, and only when you press them. Claude then works under its own permissions. Nothing else goes to Claude or to a model. The prompts, word for word:
   - **✎ commit…**: `Commit the current uncommitted changes. Look at the diff, propose a commit message and ask me before committing.`
   - **new branch here**: `Create a new git branch from commit <hash> ("<subject>"). Ask me for the branch name first, and whether to switch to it.`, with the commit's short hash and subject.
-- **What it keeps.** Your settings (lanes, columns, dimming, date format), in Claude Code's store for the plugin, on your machine. Nothing about your repos.
+- **What it keeps.** Your settings (lanes, columns, dimming, date format) and, for each folder that holds several repos, the path of the one you picked last there, in Claude Code's store for the plugin, on your machine. Nothing else about your repos.
 - **No credentials.** It reads no token, key or password, from the environment or from files. A signed commit's signer and key fingerprint come from `git show` and are only shown in the pane. Pushing and fetching use whatever git is already set up with, inside git.
 - **Hooks.** `session.start` registers `/git-graph` and loads your settings; `command.run` answers `/git-graph` by opening the pane; `turn.start` and `turn.complete` note when Claude is working and reload the graph when it finishes, without changing the turn; `ui.render` draws the pane, and `ui.close` clears the open commit, the find field and the page when it closes. It does not watch or change tool calls or prompts.
 - **Links.** The **↗** links (a commit's page, a pull request, `#123` in a message) are built from your first remote's address and open in your browser only when you click them. Avatars are initials drawn in the pane, not pictures fetched from the web.
