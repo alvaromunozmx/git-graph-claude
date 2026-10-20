@@ -1,5 +1,9 @@
 # Git Graph for Claude Code
 
+[![test](https://github.com/alvaromunozmx/git-graph-claude/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/alvaromunozmx/git-graph-claude/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/alvaromunozmx/git-graph-claude)](https://github.com/alvaromunozmx/git-graph-claude/releases/latest)
+[![license](https://img.shields.io/github/license/alvaromunozmx/git-graph-claude)](LICENSE)
+
 A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your branches, tags and remotes laid out in lanes, like the VS Code extension, next to the conversation.
 
 <img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src=".github/screenshot.png" />
@@ -137,6 +141,10 @@ It is a Claude Code *mod*: [`hooks/register.tsx`](hooks/register.tsx) registers 
 | `npm run zip` | `dist/git-graph.zip`, ready to upload in Claude Desktop |
 
 To release: `npm version patch` (or `minor`, `major`) bumps `package.json`, `plugin.json` and `marketplace.json` together and tags the commit; `git push --follow-tags` publishes a GitHub release with the zip. Users update with `/plugin marketplace update git-graph-claude`.
+
+## Changes
+
+Every version and what it changed is in [CHANGELOG.md](CHANGELOG.md). To report a bug or ask for something, [open an issue](https://github.com/alvaromunozmx/git-graph-claude/issues/new/choose).
 
 ## License
 

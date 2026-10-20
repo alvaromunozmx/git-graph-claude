@@ -18,7 +18,15 @@ jobs:
           node-version: 24
       - run: npm run test:node
       - run: npm run zip
+      # The tag's section of CHANGELOG.md is the release's notes; GitHub adds the merged changes under it
+      - name: Notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## /{on = ($2 == v)} on' CHANGELOG.md | tail -n +2 > dist/notes.md
+          test -s dist/notes.md || echo "No CHANGELOG.md section for $version." > dist/notes.md
+          cat dist/notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/git-graph.zip
+          body_path: dist/notes.md
           generate_release_notes: true
