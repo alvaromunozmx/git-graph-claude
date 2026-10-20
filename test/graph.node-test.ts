@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, fitOptions, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, repoCandidates, repoNamed, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, branchesMatching, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, fitOptions, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, repoCandidates, repoNamed, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 /** The segments an SVG strokes in one color. */
 const strokeOf = (svg: string, color: string) => svg.match(new RegExp(`<path stroke="${color}" d="([^"]*)"`))?.[1] ?? ''
@@ -210,6 +210,13 @@ test('a folder of repos: its own folders, by name, hidden ones and dependencies 
   ]
   assert.deepEqual(repoCandidates(entries), ['fleet-hub-admin', 'fleet-hub-api'])
   assert.deepEqual(repoCandidates([]), [])
+})
+
+test('the branch panel keeps the branches whose name holds what was typed, whatever its case', () => {
+  const names = ['main', 'feat/Telemetry', 'origin/feat/telemetry-v2', 'fix/login']
+  assert.deepEqual(branchesMatching(names, 'TELEMETRY'), ['feat/Telemetry', 'origin/feat/telemetry-v2'])
+  assert.deepEqual(branchesMatching(names, '  '), names)
+  assert.deepEqual(branchesMatching(names, 'nope'), [])
 })
 
 test('a picker takes at most 64 options: the rest are counted, and the one selected stays', () => {

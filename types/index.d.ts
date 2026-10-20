@@ -116,6 +116,12 @@ declare module 'claude-code' {
       repo: string | null
       /** Counts the picks of a separator in the branch picker, so the picker draws again */
       pickerRedraw: number
+      /** The branch panel is open: every branch, found by name, past what the branch picker holds */
+      branchesOpen: boolean
+      /** What the branch panel's field holds: branches whose name holds it are the only ones listed */
+      branchQuery: string
+      /** How many commits the history loads; null: as many as the plugin's `limit` option says */
+      loadLimit: number | null
       /** One branch to draw alone, picked in the header; null: every branch or the current one */
       branchFilter: string | null
       /** Where the page of rows drawn starts, in the rows the find field keeps */
