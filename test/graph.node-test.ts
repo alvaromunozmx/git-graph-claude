@@ -6,6 +6,9 @@ import assert from 'node:assert/strict'
 
 import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
+/** The segments an SVG strokes in one color. */
+const strokeOf = (svg: string, color: string) => svg.match(new RegExp(`<path stroke="${color}" d="([^"]*)"`))?.[1] ?? ''
+
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
 
@@ -158,7 +161,7 @@ test('curves draw a dot per commit, a line per lane and rounded joins', () => {
   assert.match(svg, /^<svg [^>]*width="21" height="19"/)
   assert.equal(svg.match(/<circle /g)?.length, 1)
   // The fork to the right is a curve down into the new lane, in that lane's color
-  assert.match(svg, /<path d="M14 9.5Q17.5 9.5 17.5 19" stroke="#d9008f"/)
+  assert.match(strokeOf(svg, '#d9008f'), /M14 9.5Q17.5 9.5 17.5 19/)
   // The root's dot has a line above it and none below
   const rootSvg = curvesOf(root?.cells ?? [])
   assert.match(rootSvg, /M3.5 0V9.5/)
@@ -188,8 +191,8 @@ test('a line passing through a join keeps going, in its own color, to the commit
   // The a-branch's join keeps its lane; the fork to s2's lane passes through it
   assert.deepEqual(join, { ch: '╯', lane: 1, across: 2 })
   const svg = curvesOf(commits[3]?.cells ?? [])
-  assert.match(svg, /<path d="M14 9.5H21" stroke="#00d90a"/)
-  assert.match(svg, /<path d="M17.5 0Q17.5 9.5 14 9.5" stroke="#d9008f"/)
+  assert.match(strokeOf(svg, '#00d90a'), /M14 9.5H21/)
+  assert.match(strokeOf(svg, '#d9008f'), /M17.5 0Q17.5 9.5 14 9.5/)
 })
 
 test('submodules checked out are listed, the ones not initialized left out', () => {
@@ -219,5 +222,5 @@ test('the lanes that go on below a row are drawn straight down beside a panel', 
   const svg = linesDownOf(b?.cells ?? [], 10)
   assert.match(svg, /height="190"/)
   assert.equal(svg.match(/<path /g)?.length, 2)
-  assert.match(svg, /<path d="M17.5 0V190" stroke="#d9008f"/)
+  assert.equal(strokeOf(svg, '#d9008f'), 'M17.5 0V190')
 })

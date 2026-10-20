@@ -782,3 +782,58 @@ test('a commit panel has a title, quick links and its actions in groups', async 
     await ui.press({ key: 'hash-a1' })
   }
 })
+
+/** A long straight history, `count` commits, the newest first. */
+const longLog = (count: number) => Array.from({ length: count }, (_, i) => {
+  const n = count - i
+  return [`c${n}`, n > 1 ? `c${n - 1}` : '', n === count ? 'HEAD -> main, origin/main' : '', i % 3 === 0 ? 'Ana' : 'Alvaro', '19 Oct 2026 10:00', `commit number ${n}`].join(SEP)
+}).join('\n')
+
+test('rows come a page at a time: older and newer replace them', async ($, on) => {
+  world(on, { log: longLog(95), 'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'c95\n') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: '1–40 of 95' })).toBeDefined()
+    expect(await ui.find({ key: 'newer' })).toBeUndefined()
+    await ui.press({ key: 'older' })
+    expect(await ui.find({ type: 'Text', text: '41–80 of 95' })).toBeDefined()
+    expect(await ui.find({ key: 'hash-c95' })).toBeUndefined()
+    expect(await ui.find({ key: 'hash-c55' })).toBeDefined()
+    await ui.press({ key: 'older' })
+    expect(await ui.find({ type: 'Text', text: '81–95 of 95' })).toBeDefined()
+    expect(await ui.find({ key: 'older' })).toBeUndefined()
+    await ui.press({ key: 'newer' })
+    await ui.press({ key: 'newer' })
+    expect(await ui.find({ type: 'Text', text: '1–40 of 95' })).toBeDefined()
+  }
+})
+
+test('j and k turn the page at its edges; with nothing open they start at its top', async ($, on) => {
+  world(on, { log: longLog(95), 'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'c95\n') })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  // k with nothing open opens the first row, not the last commit of the history
+  await ui.press({ key: 'previous' })
+  expect((await ui.find({ key: 'hash-c95' }))?.props.dimColor).toBe(false)
+  await ui.press({ key: 'hash-c95' })
+  await ui.press({ key: 'older' })
+  await ui.press({ key: 'next' })
+  expect((await ui.find({ key: 'hash-c55' }))?.props.dimColor).toBe(false)
+  await ui.press({ key: 'previous' })
+  // c56 is the last row of the first page: the walk turned back to it
+  expect(await ui.find({ type: 'Text', text: '1–40 of 95' })).toBeDefined()
+  expect((await ui.find({ key: 'hash-c56' }))?.props.dimColor).toBe(false)
+})
+
+test('what a page sends the surface stays small, an open commit included', async ($, on) => {
+  world(on, { log: longLog(95), 'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'c95\n') })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'hash-c90' })
+  // Every row's SVGs ride along on every redraw: 40 rows with curves and avatars stay under 100k
+  expect(JSON.stringify(await ui.drawn()).length).toBeLessThan(100000)
+  await ui.press({ key: 'older' })
+  await ui.press({ key: 'older' })
+  expect(JSON.stringify(await ui.drawn()).length).toBeLessThan(100000)
+})
