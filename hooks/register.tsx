@@ -593,16 +593,19 @@ async function note ($: Engine, kind: Note['kind'], text: string) {
 
 // ── Actions ────────────────────────────────────────────────────────────────────
 
+// Each platform's clipboard programs, tried in order; the text goes in on standard input, no shell
+const CLIPBOARDS: Record<string, string[][]> = {
+  Darwin: [['pbcopy']],
+  Linux: [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '--clipboard', '--input']]
+}
+
 async function copyText ($: Engine, text: string, what: string) {
-  const platform = (await $.process.run(['uname', '-s']).catch(() => undefined))?.stdout.trim()
-  const argv = platform === 'Darwin'
-    ? ['sh', '-c', 'printf %s "$GG_TEXT" | pbcopy']
-    : platform === 'Linux'
-      ? ['sh', '-c', 'printf %s "$GG_TEXT" | (wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null || xsel -b)']
-      : ['cmd', '/c', 'echo|set /p="%GG_TEXT%"| clip']
-  const result = await $.process.run(argv, { env: { GG_TEXT: text } }).catch(() => undefined)
-  if (result?.exitCode === 0) await note($, 'ok', `copied ${what}`)
-  else await note($, 'error', 'could not reach the clipboard')
+  const platform = (await $.process.run(['uname', '-s']).catch(() => undefined))?.stdout.trim() ?? ''
+  for (const argv of CLIPBOARDS[platform] ?? [['clip']]) {
+    const result = await $.process.run(argv, { stdin: text }).catch(() => undefined)
+    if (result?.exitCode === 0) return note($, 'ok', `copied ${what}`)
+  }
+  await note($, 'error', 'could not reach the clipboard')
 }
 
 /** The words an action's confirming button asks with. */

@@ -2,8 +2,11 @@
 
 Every version of Git Graph for Claude Code, newest first. Each release on GitHub carries its section as its notes.
 
-## Unreleased
+## 0.3.34 — 2026-10-20
 
+- **Fixed:** Copying to the clipboard runs the clipboard program itself, with the text on standard input: no shell, no environment variable
+- **Added:** An icon for the plugin directory listing
+- **Docs:** The README quotes the prompts the pane sends Claude and says what each hook does
 - **Docs:** The uncommitted changes screenshot with the new header and a diff open
 - **Docs:** Requirements, and what to check when /git-graph doesn't appear
 - **Docs:** Four short GIFs of the pane in the README
