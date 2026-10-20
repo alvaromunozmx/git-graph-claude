@@ -11,8 +11,10 @@ export type Commit = {
   date: string
   subject: string
   cells: Cell[]
-  /** A row that is no commit: the working tree's uncommitted changes */
-  kind?: 'worktree'
+  /** A row that is no commit on a branch: the working tree's uncommitted changes, or a stash */
+  kind?: 'worktree' | 'stash'
+  /** A stash's name, `stash@{0}` */
+  stash?: string
 }
 
 /** A file a commit (or the working tree) changed: A, M, D, R, C, T or ? (untracked). */
@@ -46,8 +48,11 @@ export type ResetMode = 'soft' | 'mixed' | 'hard'
 /** An action on a branch or tag badge that changes the repo or a remote: it waits for a confirming click. */
 export type RefAction = 'checkout-ref' | 'merge-ref' | 'rebase-ref' | 'delete-branch' | 'force-delete-branch' | 'delete-remote-branch' | 'delete-tag' | 'push-ref'
 
-/** An action waiting for its confirming click: on a commit (its hash) or on a ref (its name). */
-export type Pending = { action: CommitAction | RefAction; hash: string }
+/** An action on a stash that loses it: it waits for a confirming click. */
+export type StashAction = 'stash-pop' | 'stash-drop'
+
+/** An action waiting for its confirming click: on a commit or stash (its hash) or on a ref (its name). */
+export type Pending = { action: CommitAction | RefAction | StashAction; hash: string }
 
 export type Note = { kind: 'ok' | 'error' | 'info'; text: string }
 
@@ -69,6 +74,8 @@ declare module 'claude-code' {
       ref: Ref | null
       /** The branch whose rename field is open */
       renaming: string | null
+      /** What a stash field is open for: stashing the changes, or a branch from a stash (its hash) */
+      stashing: string | null
       /** The commit whose tag field is open */
       tagging: string | null
       /** What the find field holds: rows that match it are the only ones drawn */

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, parseTagInput, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, withStashes, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -100,4 +100,13 @@ test('a tag field reads a name, and a message after a colon', () => {
   assert.deepEqual(parseTagInput(' v1.2 '), { name: 'v1.2' })
   assert.deepEqual(parseTagInput('v1.2: first release'), { name: 'v1.2', message: 'first release' })
   assert.deepEqual(parseTagInput('v1.2:  '), { name: 'v1.2' })
+})
+
+test('a stash forks off the commit it was made on', () => {
+  const stashes = parseStashes(['s', 'b i', 'stash@{0}', 'Alvaro', 'today', 'WIP on main'].join(SEP))
+  assert.equal(stashes[0]?.stash, 'stash@{0}')
+  assert.deepEqual(stashes[0]?.parents, ['b'])
+  const commits = withStashes(parseLog(log([['c', 'b'], ['b', 'a'], ['a', '']]), new Set()), stashes)
+  assert.deepEqual(commits.map(commit => commit.hash), ['c', 's', 'b', 'a'])
+  assert.deepEqual(layout(commits).map(draw), ['●', '│ ●', '●─╯', '●'])
 })

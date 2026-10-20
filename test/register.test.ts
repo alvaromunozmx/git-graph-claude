@@ -392,3 +392,45 @@ test('a repo with no remote has no fetch', async ($, on) => {
   const ui = await mount($, 'terminal')
   expect(await ui.find({ key: 'fetch' })).toBeUndefined()
 })
+
+const STASHES = [['s1', 'b2 i1', 'stash@{0}', 'Alvaro', '19 Oct 2026 12:00', 'WIP on main: second commit']].map(row => row.join(SEP)).join('\n')
+
+test('a stash forks off its commit and applies, pops or drops', async ($, on) => {
+  const seen = world(on, { stash: args => (args[0] === 'list' ? `${STASHES}\n` : '') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: '[stash@{0}] ' })).toBeDefined()
+    // The log leaves the stash ref out: the stash list draws it
+    expect(seen.git.findLast(args => args[0] === 'log')?.slice(1, 3)).toEqual(['--exclude=refs/stash', '--all'])
+    await ui.press({ key: 'hash-s1' })
+    // A stash's files are read against the commit it was made on
+    expect(seen.git.findLast(args => args[0] === 'diff-tree')?.slice(-2)).toEqual(['b2', 's1'])
+    await ui.press({ key: 'stash-apply' })
+    expect(seen.git.findLast(args => args[0] === 'stash' && args[1] !== 'list')).toEqual(['stash', 'apply', 'stash@{0}'])
+    await ui.press({ key: 'stash-drop' })
+    expect((await ui.find({ key: 'stash-drop' }))?.props.label).toBe('confirm: drop stash@{0}?')
+    await ui.press({ key: 'stash-drop' })
+    expect(seen.git.findLast(args => args[0] === 'stash' && args[1] !== 'list')).toEqual(['stash', 'drop', 'stash@{0}'])
+  }
+})
+
+test('a branch is made from a stash in a field', async ($, on) => {
+  const seen = world(on, { stash: args => (args[0] === 'list' ? `${STASHES}\n` : '') })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'hash-s1' })
+  await ui.press({ key: 'stash-branch' })
+  await ui.input({ key: 'stash-branch-name', text: 'rescued' })
+  expect(seen.git.findLast(args => args[0] === 'stash' && args[1] !== 'list')).toEqual(['stash', 'branch', 'rescued', 'stash@{0}'])
+})
+
+test('uncommitted changes stash with a message, untracked files included', async ($, on) => {
+  const seen = world(on, { status: ' M a.ts\n' })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'terminal')
+  await ui.press({ key: 'hash-worktree' })
+  await ui.press({ key: 'stash' })
+  await ui.input({ key: 'stash-message', text: 'half done' })
+  expect(seen.git.findLast(args => args[0] === 'stash' && args[1] !== 'list')).toEqual(['stash', 'push', '--include-untracked', '-m', 'half done'])
+})
