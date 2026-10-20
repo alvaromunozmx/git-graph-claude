@@ -317,7 +317,7 @@ test('a branch badge opens its actions under the row', async ($, on) => {
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     await ui.press({ key: 'ref-local-feature' })
-    expect(await ui.find({ type: 'Text', text: 'branch feature' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Branch feature' })).toBeDefined()
     expect(await ui.find({ key: 'rebase-ref' })).toBeDefined()
     await ui.press({ key: 'merge-ref' })
     await ui.press({ key: 'merge-ref' })
@@ -336,7 +336,7 @@ test('the current branch pulls, and offers no checkout', async ($, on) => {
   await $.command.run(typed(''))
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'ref-head-main' })
-  expect(await ui.find({ type: 'Text', text: 'current branch main' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Current branch main' })).toBeDefined()
   expect(await ui.find({ key: 'checkout-ref' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'in step with origin/main' })).toBeDefined()
   await ui.press({ key: 'pull' })
@@ -749,7 +749,7 @@ test('a local branch not checked out pulls from its upstream without a checkout'
     const ui = await mount($, surface)
     await ui.press({ key: 'ref-local-feature' })
     expect(await ui.find({ type: 'Text', text: '↑1 to push, ↓2 to pull · origin/feature' })).toBeDefined()
-    expect((await ui.find({ key: 'pull' }))?.props.label).toBe('⇣ pull from origin/feature')
+    expect((await ui.find({ key: 'pull' }))?.props.label).toBe('⇣ Pull from origin/feature')
     await ui.press({ key: 'pull' })
     expect(seen.git.findLast(args => args[0] === 'fetch')).toEqual(['fetch', 'origin', 'feature:feature'])
     await ui.press({ key: 'ref-local-feature' })
@@ -762,4 +762,23 @@ test('a branch with no upstream offers no pull', async ($, on) => {
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'ref-local-feature' })
   expect(await ui.find({ key: 'pull' })).toBeUndefined()
+})
+
+test('a commit panel has a title, quick links and its actions in groups', async ($, on) => {
+  world(on, { remote: args => (args[0] === 'get-url' ? 'git@github.com:o/r.git\n' : 'origin\n') })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'a1')
+    expect(await ui.find({ type: 'Text', text: 'Commit a1' })).toBeDefined()
+    expect((await ui.find({ type: 'Link' }))?.props.href).toBe('https://github.com/o/r/commit/a1')
+    // Actions are real buttons, not plain links, in two groups split by a bar
+    expect((await ui.find({ key: 'checkout' }))?.props.plain).toBeUndefined()
+    // (the terminal's lanes are drawn with the same bar, so it is counted on desktop alone)
+    if (surface === 'desktop') expect(await ui.findAll({ type: 'Text', text: '│' })).toHaveLength(1)
+    // The one waiting for its confirming press is the primary one
+    await ui.press({ key: 'revert' })
+    expect((await ui.find({ key: 'revert' }))?.props).toMatchObject({ variant: 'primary', label: 'confirm: revert a1 on main?' })
+    expect((await ui.find({ key: 'merge' }))?.props.variant).toBeUndefined()
+    await ui.press({ key: 'hash-a1' })
+  }
 })
