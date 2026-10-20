@@ -22,7 +22,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -45,6 +45,7 @@ const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
 const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
 const CURVES_REF = { plugin: 'git-graph', key: 'curves' } as const
+const AVATARS_REF = { plugin: 'git-graph', key: 'avatars' } as const
 const MUTE_OTHERS_REF = { plugin: 'git-graph', key: 'muteOthers' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
@@ -65,6 +66,7 @@ const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
 const CURVES = atom(CURVES_REF, false)
+const AVATARS = atom(AVATARS_REF, true)
 const MUTE_OTHERS = atom(MUTE_OTHERS_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
@@ -84,6 +86,8 @@ const CROSSING = new Set(['┼'])
 const AUTHOR_WIDTH = 14
 const DATE_WIDTH = 17
 const HASH_WIDTH = 7
+// An avatar and the space after it
+const AVATAR_WIDTH = 3
 
 let limit = 150
 let isOpen = false
@@ -429,6 +433,10 @@ async function toggleSettings ($: Engine) {
 
 async function toggleCurves ($: Engine) {
   await $.state.set(CURVES_REF, !(await read($, CURVES)))
+}
+
+async function toggleAvatars ($: Engine) {
+  await $.state.set(AVATARS_REF, !(await read($, AVATARS)))
 }
 
 async function toggleMuteMerges ($: Engine) {
@@ -860,6 +868,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const muteMerges = await read($, MUTE_MERGES)
   // Only a surface that draws SVG gets curves
   const curves = Boolean(ui.Svg) && (await read($, CURVES))
+  const avatars = await read($, AVATARS)
   const muteOthers = await read($, MUTE_OTHERS)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
@@ -918,6 +927,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>lanes:</Text>
           <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />
           {ui.Svg && <Button key="curves" label={curves ? 'curves' : 'glyphs'} plain onPress={() => toggleCurves($)} />}
+          <Button key="avatars" label={`${avatars ? '☑' : '☐'} avatars`} plain onPress={() => toggleAvatars($)} />
           <Text dimColor>dim:</Text>
           <Button key="mute-merges" label={`${muteMerges ? '☑' : '☐'} merge commits`} plain onPress={() => toggleMuteMerges($)} />
           <Button key="mute-others" label={`${muteOthers ? '☑' : '☐'} commits HEAD does not reach`} plain onPress={() => toggleMuteOthers($)} />
@@ -950,7 +960,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     return node === '●' ? cells : cells.map(cell => (cell.ch === '●' ? { ...cell, ch: node } : cell))
   }
   const graphWidth = Math.max(...visible.map(commit => cellsOf(commit).length)) + 1
-  const metaWidth = AUTHOR_WIDTH + DATE_WIDTH + 2
+  const metaWidth = AUTHOR_WIDTH + DATE_WIDTH + 2 + (avatars ? AVATAR_WIDTH : 0)
   const showMeta = columns >= graphWidth + metaWidth + HASH_WIDTH + 30
   const textWidth = columns - graphWidth - HASH_WIDTH - 3 - (showMeta ? metaWidth + 1 : 0)
 
@@ -962,7 +972,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
+    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', avatars, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
@@ -986,6 +996,19 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       </Box>
     </Box>
   )
+}
+
+/** Initials on the author's color: a round SVG where the surface draws one, colored letters elsewhere. */
+function drawAvatar (ui: Ui, author: string) {
+  const { Box, Svg, Text } = ui
+  if (Svg) {
+    return (
+      <Box width={AVATAR_WIDTH} flexShrink={0} height={1}>
+        <Svg source={avatarOf(author, 15)} alt={initialsOf(author)} width={15} height={15} />
+      </Box>
+    )
+  }
+  return <Box width={AVATAR_WIDTH} flexShrink={0}><Text color={LANE_COLORS[colorIndexOf(author, LANE_COLORS.length)]} bold>{initialsOf(author)}</Text></Box>
 }
 
 /** A text with the part that matches the find field lit. */
@@ -1016,7 +1039,7 @@ function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
 
 function drawRow (
   ui: Ui, $: Engine, commit: Commit, cells: Commit['cells'],
-  { curves, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { curves: boolean; graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
+  { curves, avatars, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { curves: boolean; avatars: boolean; graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
 ) {
   const { Box, Button, Svg, Text } = ui
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
@@ -1059,7 +1082,8 @@ function drawRow (
         </Text>
       </Box>
       {showMeta && (
-        <Box width={AUTHOR_WIDTH + 1} flexShrink={0} marginLeft={1}>
+        <Box width={AUTHOR_WIDTH + 1 + (avatars ? AVATAR_WIDTH : 0)} flexShrink={0} marginLeft={1} flexDirection="row">
+          {avatars && commit.author !== '' && drawAvatar(ui, commit.author)}
           <Text dimColor wrap="truncate-end">{drawLit(Text, commit.author, query, {})}</Text>
         </Box>
       )}

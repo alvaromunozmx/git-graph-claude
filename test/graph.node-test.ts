@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -163,4 +163,13 @@ test('curves draw a dot per commit, a line per lane and rounded joins', () => {
   const rootSvg = curvesOf(root?.cells ?? [])
   assert.match(rootSvg, /M4 0V9.5/)
   assert.doesNotMatch(rootSvg, /M4 9.5V19/)
+})
+
+test('an author gets initials and always the same color', () => {
+  assert.equal(initialsOf('Alvaro Muñoz'), 'AM')
+  assert.equal(initialsOf('alvaromunozmx'), 'AL')
+  assert.equal(initialsOf('ana.maria.lopez'), 'AL')
+  assert.equal(initialsOf('  '), '?')
+  assert.equal(colorIndexOf('Ana', 8), colorIndexOf('Ana', 8))
+  assert.match(avatarOf('Ana <x>'), /<text [^>]*>AN<\/text>/)
 })
