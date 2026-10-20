@@ -60,6 +60,14 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
 
+Uncommitted changes, opened: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**.
+
+<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
+
+A commit, opened: its actions in groups, the author and date, its lines added and deleted, its message with links, and its files, each opening its diff.
+
+<img alt="A commit opened in the Git Graph pane: its actions, author, date, message and changed files with lines added and deleted" src=".github/commit-detail.png" />
+
 Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
 ## Settings
