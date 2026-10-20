@@ -19,7 +19,8 @@
 // - The settings (lanes, avatars, columns, date format, what is dim) are kept between sessions.
 // - Keys, while the pane has the focus: j and k walk the commits, h goes to HEAD, s finds,
 //   f fetches, r reloads; Esc closes the pane.
-// - On desktop the lanes can be drawn as curves, an SVG per row, instead of glyphs.
+// - Where the surface draws SVG (desktop), the lanes are curves, an SVG per row; the terminal
+//   draws them with box-drawing glyphs, which join there.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
@@ -72,7 +73,8 @@ const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
-const CURVES = atom(CURVES_REF, false)
+// Curves by default: in a proportional font with tall rows, glyphs cannot join from row to row
+const CURVES = atom(CURVES_REF, true)
 const AVATARS = atom(AVATARS_REF, true)
 const SHOW_AUTHOR = atom(SHOW_AUTHOR_REF, true)
 const SHOW_DATE = atom(SHOW_DATE_REF, true)

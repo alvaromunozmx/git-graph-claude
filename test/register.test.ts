@@ -570,18 +570,21 @@ test('a message links its issues, and the commit its page, on GitHub', async ($,
   }
 })
 
-test('desktop draws the lanes as curves when the settings say so', async ($, on) => {
+test('desktop draws the lanes as curves, unless the settings say glyphs', async ($, on) => {
   world(on)
   await $.command.run(typed(''))
   const desktop = await mount($, 'desktop')
   // The lanes' SVGs say nothing to a reader; the avatars say their initials
   const lanes = async () => (await desktop.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === '')
-  expect(await lanes()).toHaveLength(0)
-  await desktop.press({ key: 'settings' })
-  await desktop.press({ key: 'curves' })
   const rows = await lanes()
   expect(rows).toHaveLength(3)
   expect(String(rows[0]?.props.source)).toContain('<circle')
+  await desktop.press({ key: 'settings' })
+  await desktop.press({ key: 'curves' })
+  expect((await desktop.find({ key: 'curves' }))?.props.label).toBe('glyphs')
+  expect(await lanes()).toHaveLength(0)
+  expect(await desktop.find({ type: 'Text', text: '●' })).toBeDefined()
+  await desktop.press({ key: 'curves' })
   // The terminal draws no SVG: it keeps the glyphs and offers no switch
   const terminal = await mount($, 'terminal')
   expect(await terminal.find({ key: 'curves' })).toBeUndefined()
@@ -601,7 +604,8 @@ test('each author has an avatar, which the settings can hide', async ($, on) => 
   world(on)
   await $.command.run(typed(''))
   const desktop = await mount($, 'desktop')
-  expect((await desktop.findAll({ type: 'Svg' })).map(svg => svg.props.alt)).toEqual(['AN', 'AL', 'AL'])
+  // The avatars are the SVGs that say something: the lanes' say nothing
+  expect((await desktop.findAll({ type: 'Svg' })).map(svg => svg.props.alt).filter(Boolean)).toEqual(['AN', 'AL', 'AL'])
   const terminal = await mount($, 'terminal')
   expect(await terminal.find({ type: 'Text', text: 'AN' })).toBeDefined()
   await terminal.press({ key: 'settings' })

@@ -357,7 +357,8 @@ export function linkify (message: string, forge: Forge | null): string {
 export const CURVE_COLORS = ['#0085d9', '#d9008f', '#00d90a', '#d98500', '#a300d9', '#ff0000', '#00d9cc', '#e138e8']
 
 /** The size of one cell of the curves, in CSS pixels: a desktop row's height, and a lane step. */
-export const CURVE_CELL = { width: 8, height: 19 }
+// A lane step of two cells, 14 px, stays inside the column's width: a desktop cell is about 7.5 px
+export const CURVE_CELL = { width: 7, height: 19 }
 
 /**
  * One row's cells as an SVG of curves, like Git Graph draws: a line per lane, rounded joins
