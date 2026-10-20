@@ -199,7 +199,7 @@ async function git ($: Engine, args: string[], okCodes: number[] = [0], timeoutM
 }
 
 async function gitIn ($: Engine, cwd: string, args: string[], okCodes: number[] = [0], timeoutMs?: number) {
-  // A remote that wants a password fails at once instead of waiting for one nobody can type
+  // A remote that asks for a login fails at once instead of waiting for input nobody can type
   const result = await $.process.run(['git', '-C', cwd, ...args], { env: { GIT_TERMINAL_PROMPT: '0' }, ...(timeoutMs ? { timeoutMs } : {}) })
   if (!okCodes.includes(result.exitCode)) throw new Error((result.stderr || result.stdout).trim() || `git ${args[0]} failed`)
   return result.stdout
@@ -316,7 +316,7 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
     // A merge is shown against its first parent, as Git Graph does
     const range = parent ? [parent, hash] : ['--root', hash]
     const [shown, names, numstat] = await Promise.all([
-      // The first line is the signature, as git checks it (gpg or ssh, where they are set up)
+      // The first line is the signature, as git checks it where signing is set up
       git($, ['show', '-s', `--format=${SIGNATURE_FORMAT}%n%an <%ae> · %ad%n%B`, '--date=format:%d %b %Y %H:%M', hash]),
       git($, ['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', ...range]),
       git($, ['diff-tree', '-r', '-M', '--numstat', '--no-commit-id', ...range]).catch(() => '')
