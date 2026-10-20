@@ -10,7 +10,7 @@ A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your br
 
 ## Requirements
 
-- **Claude Code with mods.** Git Graph is a *mod*: a plugin with a hooks module, which Claude Code runs as an early-access feature. It was built and tested on Claude Code 2.1.299 (Claude Desktop's Code tab) and 2.1.304 (terminal). Where mods are turned off for an account or a build, the plugin installs but `/git-graph` does not appear.
+- **Claude Code 2.1.287 or later in the terminal, or 2.1.286 or later in Claude Desktop's Code tab.** Git Graph is a *mod*: a plugin with a hooks module, and Claude Code runs mods by default from those versions (`/status` in the Code tab shows its version). It is tested on 2.1.299 (Claude Desktop) and 2.1.304 (terminal). Mods don't load under `--safe-mode`, with `"disableAllHooks": true` in your settings, or where your organization lets only its own mods load: then the plugin installs but `/git-graph` does not appear.
 - **git** on the `PATH`, and a folder inside a git repository (submodules are picked from the repo picker).
 - **Claude Desktop's Code tab or the Claude Code terminal.** It is not tested in Cowork.
 - Nothing else to install: no Node, no build step. Node 22.6+ is only needed to develop it (see Development).
@@ -41,8 +41,8 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 
 1. Run `/reload-plugins`, or start a new session: a session loads its plugins when it starts.
 2. Run `/plugin` and look for an error next to `git-graph`; `claude plugin list` from a shell shows whether it is installed and enabled.
-3. Check your Claude Code version with `claude --version`: older builds may not run mods, or run an older version of their API.
-4. If it is installed, enabled and error-free and still missing, mods are likely off for your account or build for now.
+3. Check your Claude Code version: `claude --version` in a shell, `/status` in Claude Desktop's Code tab. Mods need 2.1.287 in the terminal and 2.1.286 in Claude Desktop.
+4. In a terminal, `/plugin` shows a dim `mods active` line naming the mods the session loaded. If `git-graph` isn't there, check for `--safe-mode`, for `"disableAllHooks": true` in `~/.claude/settings.json`, and whether your organization lets only its own mods load.
 
 ## Use
 
@@ -130,6 +130,17 @@ Actions that change the repo need a second click to confirm and wait for Claude 
 ## How it works
 
 It is a Claude Code *mod*: [`hooks/register.tsx`](hooks/register.tsx) registers `/git-graph`, opens a pane and draws it, and listens to `turn.complete` to reload. [`hooks/graph.ts`](hooks/graph.ts) reads `git log` and lays commits out in lanes; it does not depend on Claude Code.
+
+## What it runs and sends
+
+Like every mod, Git Graph runs on your machine with your permissions. It has no server and no telemetry, and makes no network request of its own. `claude plugin validate .` lists every hook it registers and every call it makes.
+
+- **git.** Everything it shows and does is a `git -C <repo> …` command, run with `GIT_TERMINAL_PROMPT=0` so git never waits for a password. It reads (`log`, `status`, `diff`, `show`, `branch`, `tag`, `stash list`, `remote`…) when the pane opens, when you press **↻** and when Claude finishes a turn. It changes the repo only when you press a button, and checkout, merge, rebase, cherry-pick, revert, reset, push, pop and every delete wait for a second, confirming press. Every command that changes the repo or a remote is in [`hooks/commands.ts`](hooks/commands.ts).
+- **Network.** Only git reaches the network, and only when you press **fetch**, **pull**, **push**, **push tag** or **delete on remote**: to the remotes your repo already has, with the credentials git already uses.
+- **Clipboard.** **copy hash**, **copy subject** and **copy name** run `uname -s`, then `pbcopy` (macOS), `wl-copy`, `xclip` or `xsel` (Linux) or `clip` (Windows) through `sh -c` or `cmd /c`, with the text in an environment variable.
+- **Prompts to Claude.** **✎ commit…** and **new branch here** send Claude a prompt in the current session, as if you had typed it. Claude then works under its own permissions and asks you before it commits or names the branch. Nothing else goes to Claude or to a model.
+- **What it keeps.** Your settings (lanes, columns, dimming, date format), in Claude Code's store for the plugin, on your machine. Nothing about your repos.
+- **Links.** The **↗** links (a commit's page, a pull request, `#123` in a message) are built from your first remote's address and open in your browser only when you click them. Avatars are initials drawn in the pane, not pictures fetched from the web.
 
 ## Development
 
