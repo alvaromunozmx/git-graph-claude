@@ -97,6 +97,8 @@ const NOTE_COLOR: Record<Note['kind'], string> = { ok: 'green', error: 'red', in
 const AUTHOR_WIDTH = 14
 const DATE_WIDTH = 17
 const HASH_WIDTH = 7
+// What a row's lanes say to a reader that cannot see them
+const LANES_ALT = 'graph'
 // An avatar and the space after it
 const AVATAR_WIDTH = 3
 
@@ -1191,8 +1193,10 @@ function drawRow (
     <Box key={commit.hash} flexDirection="row">
       {curves
         ? (
-          <Box width={graphWidth} height={1} flexShrink={0} overflow="hidden">
-            <Svg source={curvesOf(cells)} alt="" width={Math.max(1, cells.length) * CURVE_CELL.width} height={CURVE_CELL.height} />
+          // Built like an avatar, which desktop draws: a box with no clipping, and an alt that says
+          // something (an SVG with an empty alt was left out of the pane)
+          <Box width={graphWidth} height={1} flexShrink={0}>
+            <Svg source={curvesOf(cells)} alt={LANES_ALT} width={Math.max(1, cells.length) * CURVE_CELL.width} height={CURVE_CELL.height} />
           </Box>
           )
         : (

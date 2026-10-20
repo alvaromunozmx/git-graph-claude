@@ -574,10 +574,12 @@ test('desktop draws the lanes as curves, unless the settings say glyphs', async 
   world(on)
   await $.command.run(typed(''))
   const desktop = await mount($, 'desktop')
-  // The lanes' SVGs say nothing to a reader; the avatars say their initials
-  const lanes = async () => (await desktop.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === '')
+  // The lanes' SVGs say `graph`; the avatars say their initials
+  const lanes = async () => (await desktop.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === 'graph')
   const rows = await lanes()
   expect(rows).toHaveLength(3)
+  // Desktop leaves out an SVG with nothing in its alt
+  expect(rows.every(row => row.props.alt !== '')).toBe(true)
   expect(String(rows[0]?.props.source)).toContain('<circle')
   await desktop.press({ key: 'settings' })
   await desktop.press({ key: 'curves' })
@@ -604,8 +606,8 @@ test('each author has an avatar, which the settings can hide', async ($, on) => 
   world(on)
   await $.command.run(typed(''))
   const desktop = await mount($, 'desktop')
-  // The avatars are the SVGs that say something: the lanes' say nothing
-  expect((await desktop.findAll({ type: 'Svg' })).map(svg => svg.props.alt).filter(Boolean)).toEqual(['AN', 'AL', 'AL'])
+  // The avatars are the SVGs that say their initials; the lanes' say `graph`
+  expect((await desktop.findAll({ type: 'Svg' })).map(svg => svg.props.alt).filter(alt => alt !== 'graph')).toEqual(['AN', 'AL', 'AL'])
   const terminal = await mount($, 'terminal')
   expect(await terminal.find({ type: 'Text', text: 'AN' })).toBeDefined()
   await terminal.press({ key: 'settings' })
