@@ -9,6 +9,7 @@
 // - Actions that change the repo (checkout, cherry-pick, revert, merge, rebase, reset) ask for
 //   a second click to confirm; a tag is named in a field under the commit;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
+// - ⇣ fetch brings every remote's branches and tags, pruning the ones deleted there.
 // - The branch picker draws every branch, the current one, or any one branch alone.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow.
@@ -563,6 +564,18 @@ async function runRef ($: Engine, action: RefAction, ref: Ref) {
   await reload($)
 }
 
+/** Every remote's branches and tags; branches deleted on a remote go here too. */
+async function fetchAll ($: Engine) {
+  await note($, 'info', 'fetching…')
+  try {
+    await git($, ['fetch', '--all', '--prune', '--tags'], [0], 300000)
+    await note($, 'ok', 'fetched every remote')
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
 /** Pull and fetch change nothing local but the branch they update: they run on one click. */
 async function pullRef ($: Engine, ref: Ref) {
   if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
@@ -672,6 +685,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               />
               )
             : <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />}
+          {graph && graph.remotes.length > 0 && <Button key="fetch" label="⇣ fetch" plain dimColor onPress={() => fetchAll($)} />}
           <Button key="reload" label="↻" plain onPress={() => reload($)} />
         </Box>
       </Box>
