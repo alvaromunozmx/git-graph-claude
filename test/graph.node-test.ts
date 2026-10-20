@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -202,4 +202,11 @@ test('a branch opens a pull request on its forge, never into itself', () => {
   assert.equal(pullRequestUrl(forgeOf('https://bitbucket.org/o/r'), 'fix', 'dev'), 'https://bitbucket.org/o/r/pull-requests/new?source=fix&dest=dev')
   assert.equal(pullRequestUrl(forgeOf('git@github.com:o/r.git'), 'main', 'main'), null)
   assert.equal(pullRequestUrl(null, 'fix', 'main'), null)
+})
+
+test('a signature reads as git checked it; an unsigned commit has none', () => {
+  assert.deepEqual(describeSignature('G', 'Alvaro <a@b.c>', 'ABC123'), { text: '✓ good signature by Alvaro <a@b.c> (key ABC123)', kind: 'good' })
+  assert.deepEqual(describeSignature('B', '', 'ABC123'), { text: '✗ bad signature (key ABC123)', kind: 'bad' })
+  assert.equal(describeSignature('E', '', 'K')?.kind, 'unchecked')
+  assert.equal(describeSignature('N', '', ''), undefined)
 })

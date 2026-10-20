@@ -34,7 +34,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
   - a remote branch: **checkout** (a local branch tracking it), **merge into current**, **rebase current onto this**, **fetch**, **delete on remote**.
   - a tag: **checkout** (detached), **merge into current**, **push tag**, **delete tag**.
-- **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. Each file shows its status (A, M, D, R) and the lines it added and deleted, and the commit its totals. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
+- **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. A signed commit says who signed it and whether git trusts the signature (GPG or SSH, as git is set up to check them). Each file shows its status (A, M, D, R) and the lines it added and deleted, and the commit its totals. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
   - **↗ github.com** (or gitlab.com, bitbucket.org) opens the commit's page. In the message, `#123` links to that issue or pull request and web addresses are links.
   - **⇄ compare…** marks it; every commit opened next lists the files that changed between the two, older to newer, each with its diff (the uncommitted row compares too). **✕ stop comparing** in the header ends it.
   - **copy hash** and **copy subject** to the clipboard.

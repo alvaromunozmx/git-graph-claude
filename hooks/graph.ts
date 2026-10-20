@@ -1,6 +1,6 @@
 // The pure part of Git Graph: reading `git log` and laying commits out in lanes.
 // Nothing here touches Claude Code, so it can be tested with plain Node.
-import type { Cell, Commit, DateFormat, FileChange, Forge, Ref } from '../types'
+import type { Cell, Commit, DateFormat, FileChange, Forge, Ref, Signature } from '../types'
 
 export const SEP = '\x1f'
 export const FORMAT = ['%H', '%P', '%D', '%an', '%ad', '%s'].join('%x1f')
@@ -61,6 +61,25 @@ export function parseSubmodules (stdout: string): string[] {
     const [, path = ''] = line.slice(1).split(' ')
     return path
   }).filter(Boolean)
+}
+
+/** What a commit's detail asks git for its signature: status, signer, key. */
+export const SIGNATURE_FORMAT = ['%G?', '%GS', '%GK'].join('%x1f')
+
+/** git's `%G?` letter, with the signer and key → the line the detail shows; none for an unsigned commit. */
+export function describeSignature (status: string, signer: string, key: string): Signature | undefined {
+  const by = [signer && `by ${signer}`, key && `(key ${key})`].filter(Boolean).join(' ')
+  const line = (words: string) => [words, by].filter(Boolean).join(' ')
+  switch (status) {
+    case 'G': return { text: line('✓ good signature'), kind: 'good' }
+    case 'U': return { text: line('✓ good signature, of unknown trust'), kind: 'unknown' }
+    case 'X': return { text: line('⚠ good signature that has expired'), kind: 'unknown' }
+    case 'Y': return { text: line('⚠ good signature by a key that has expired'), kind: 'unknown' }
+    case 'R': return { text: line('⚠ signature by a revoked key'), kind: 'bad' }
+    case 'B': return { text: line('✗ bad signature'), kind: 'bad' }
+    case 'E': return { text: line('? signed, but the signature cannot be checked here'), kind: 'unchecked' }
+    default: return undefined
+  }
 }
 
 /** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */

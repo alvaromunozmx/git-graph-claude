@@ -4,7 +4,7 @@
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
 // - Click a branch or tag badge for its actions: checkout, merge, rebase, rename, push, pull,
 //   delete, fetch, copy the name, and a link to open a pull request on GitHub, GitLab or Bitbucket.
-// - Click a hash to open that commit under its row: its files and a row of actions. Mark one
+// - Click a hash to open that commit under its row: who signed it, its files and a row of actions. Mark one
 //   to compare, and every commit opened next lists what changed between the two.
 //   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick, revert, merge, rebase, reset) ask for
@@ -24,7 +24,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -295,13 +295,21 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
     // A merge is shown against its first parent, as Git Graph does
     const range = parent ? [parent, hash] : ['--root', hash]
     const [shown, names, numstat] = await Promise.all([
-      git($, ['show', '-s', '--format=%an <%ae> · %ad%n%B', '--date=format:%d %b %Y %H:%M', hash]),
+      // The first line is the signature, as git checks it (gpg or ssh, where they are set up)
+      git($, ['show', '-s', `--format=${SIGNATURE_FORMAT}%n%an <%ae> · %ad%n%B`, '--date=format:%d %b %Y %H:%M', hash]),
       git($, ['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', ...range]),
       git($, ['diff-tree', '-r', '-M', '--numstat', '--no-commit-id', ...range]).catch(() => '')
     ])
-    const [meta = '', ...message] = shown.trimEnd().split('\n')
+    let lines = shown.trimEnd().split('\n')
+    let signature
+    if (lines[0]?.includes(SEP)) {
+      const [status = '', signer = '', key = ''] = lines[0].split(SEP)
+      signature = describeSignature(status, signer, key)
+      lines = lines.slice(1)
+    }
+    const [meta = '', ...message] = lines
     const files = withStats(parseNameStatus(names), parseNumstat(numstat))
-    return { hash, meta: `${meta}  ·  ${summary(files)}`, message: message.join('\n').trim(), files }
+    return { hash, meta: `${meta}  ·  ${summary(files)}`, message: message.join('\n').trim(), files, ...(signature ? { signature } : {}) }
   } catch (error) {
     return { hash, meta: `Could not read the commit: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
   }
@@ -1372,6 +1380,7 @@ function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: D
   return (
     <Box flexDirection="column">
       <Text dimColor wrap="truncate-end">{detail.meta}</Text>
+      {detail.signature && <Text color={SIGNATURE_COLOR[detail.signature.kind]} wrap="truncate-end">{detail.signature.text}</Text>}
       {detail.message !== '' && <Text> </Text>}
       {detail.message !== '' && <Markdown key="message" text={linkify(detail.message, graph.forge)} />}
       {detail.files.length > 0 && <Text> </Text>}
@@ -1379,6 +1388,8 @@ function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: D
     </Box>
   )
 }
+
+const SIGNATURE_COLOR: Record<NonNullable<NonNullable<Detail>['signature']>['kind'], string> = { good: 'green', unknown: 'yellow', bad: 'red', unchecked: 'gray' }
 
 const STATUS_COLOR: Record<string, string> = { A: 'green', M: 'yellow', D: 'red', R: 'cyan', C: 'cyan', T: 'yellow', '?': 'green', U: 'red' }
 

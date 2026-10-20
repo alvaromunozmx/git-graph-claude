@@ -55,7 +55,19 @@ export type Graph = {
  * The open commit: who and when, its message, and the files it changed; or, while a compare is
  * on, the files that changed from the older of the two commits to the newer.
  */
-export type Detail = { hash: string; meta: string; message: string; files: FileChange[]; isLoading?: boolean; compare?: { from: string; to: string } } | null
+export type Detail = {
+  hash: string
+  meta: string
+  message: string
+  files: FileChange[]
+  isLoading?: boolean
+  compare?: { from: string; to: string }
+  /** What git says of the commit's signature, when it has one */
+  signature?: Signature
+} | null
+
+/** A commit's GPG or SSH signature, as git checked it: the line to show and how it reads. */
+export type Signature = { text: string; kind: 'good' | 'unknown' | 'bad' | 'unchecked' }
 
 /** One file's diff, opened under it in the commit's detail: unified-diff hunks, or why there are none. */
 export type Diff = { hash: string; path: string; hunks: string; note?: string; isLoading?: boolean } | null
