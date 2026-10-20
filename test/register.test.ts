@@ -811,21 +811,33 @@ test('the keys answer with the settings closed: their buttons stay in the header
   }
 })
 
-test('the settings panel draws a line per group, the keys among them', async ($, on) => {
+test('the settings panel draws a line per group', async ($, on) => {
   world(on)
   await $.command.run(typed(''))
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
     await ui.press({ key: 'settings' })
     expect((await ui.find({ key: 'settings-panel' }))?.props.borderStyle).toBe('round')
-    for (const label of ['Lanes', 'Columns', 'Dim', 'Keys']) expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
+    for (const label of ['Lanes', 'Columns', 'Dim']) expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
     expect((await ui.find({ key: 'setting-columns' }))?.text).toContain('☑ author')
     expect((await ui.find({ key: 'setting-dim' }))?.text).toContain('☑ merge commits')
-    expect(await ui.find({ type: 'Text', text: 'j next · k previous · h HEAD · s find · f fetch · r reload · esc close' })).toBeDefined()
-    // The keys are told there, not pressed there: the header keeps them
-    expect((await ui.findAll({ type: 'Button' })).filter(button => button.props.hotkey === 'j')).toHaveLength(1)
-    await ui.press({ key: 'settings' })
+    // The keys are no group of their own: each header button tells its own
     expect(await ui.find({ type: 'Text', text: 'Keys' })).toBeUndefined()
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ key: 'settings-panel' })).toBeUndefined()
+  }
+})
+
+test('each header button says what it does, under the pointer', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  for (const [key, tip] of [['fetch', 'Fetch every remote and its tags · F'], ['next', 'Open the commit below · J'], ['head', 'Open the commit HEAD points at · H'], ['focus-find', 'Find by message, author, hash or branch · S']]) {
+    // The button names a hover scope; a hidden card in that scope shows while it is lit
+    expect((await ui.find({ key }))?.props.hover).toEqual({ scope: `tip-${key}` })
+    const card = (await ui.findAll({ type: 'Box' })).find(box => (box.props.hover as { scope?: string } | undefined)?.scope === `tip-${key}`)
+    expect(card?.props).toMatchObject({ position: 'absolute', display: 'none', hover: { scope: `tip-${key}`, display: 'flex' } })
+    expect(card?.text).toBe(` ${tip} `)
   }
 })
 
@@ -905,4 +917,19 @@ test('what a page sends the surface stays small, an open commit included', async
   await ui.press({ key: 'older' })
   await ui.press({ key: 'older' })
   expect(JSON.stringify(await ui.drawn()).length).toBeLessThan(100000)
+})
+
+test('hiding the author keeps the avatars, and hiding the avatars keeps the author', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const desktop = await mount($, 'desktop')
+  const avatars = async () => (await desktop.findAll({ type: 'Svg' })).map(svg => svg.props.alt).filter(alt => alt !== 'graph')
+  await desktop.press({ key: 'settings' })
+  await desktop.press({ key: 'show-author' })
+  expect(await desktop.find({ type: 'Text', text: 'Ana' })).toBeUndefined()
+  expect(await avatars()).toEqual(['AN', 'AL', 'AL'])
+  await desktop.press({ key: 'show-author' })
+  await desktop.press({ key: 'avatars' })
+  expect(await avatars()).toEqual([])
+  expect(await desktop.find({ type: 'Text', text: 'Ana' })).toBeDefined()
 })

@@ -20,8 +20,8 @@
 // - The settings (lanes, columns, avatars, date format, what is dim) are kept between sessions;
 //   ⚙ opens them as a panel, a line per group.
 // - Keys, while the pane has the focus: j and k walk the commits (↓ ↑ in the header), h goes to
-//   HEAD (the branch name), s finds (⌕), f fetches, r reloads; Esc closes the pane. The settings
-//   list them; the Buttons they press stay in the header, since a hotkey needs its Button drawn.
+//   HEAD, s finds (⌕), f fetches, r reloads; Esc closes the pane. The Buttons they press stay in
+//   the header, since a hotkey needs its Button drawn; each says what it does under the pointer.
 // - A success is a toast; the line under the header keeps errors and what is under way.
 // - Where the surface draws SVG (desktop), the lanes are curves, an SVG per row; the terminal
 //   draws them with box-drawing glyphs, which join there.
@@ -1053,9 +1053,12 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               />
               )
             : <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />}
-          {graph && graph.remotes.length > 0 && <Button key="fetch" label="⇣ fetch" hotkey="f" plain dimColor onPress={() => fetchAll($)} />}
-          <Button key="reload" label="↻" hotkey="r" plain dimColor onPress={() => reload($)} />
-          <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
+          {graph && graph.remotes.length > 0 && withTip(ui, 'fetch', 'Fetch every remote and its tags · F', 'right',
+            <Button key="fetch" label="⇣ fetch" hotkey="f" plain dimColor hover={{ scope: 'tip-fetch' }} onPress={() => fetchAll($)} />)}
+          {withTip(ui, 'reload', 'Read the history again · R', 'right',
+            <Button key="reload" label="↻" hotkey="r" plain dimColor hover={{ scope: 'tip-reload' }} onPress={() => reload($)} />)}
+          {withTip(ui, 'settings', 'Lanes, columns and what is dimmed', 'right',
+            <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} hover={{ scope: 'tip-settings' }} onPress={() => toggleSettings($)} />)}
         </Box>
       </Box>
       {/* Finding on the left, walking the rows on the right. The walk's buttons are drawn here,
@@ -1063,7 +1066,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       {isDrawn && (
         <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap={2} marginTop={1}>
           <Box flexDirection="row" columnGap={1} alignItems="center" flexGrow={1} flexShrink={1}>
-            {Input && <Button key="focus-find" label="⌕" hotkey="s" plain dimColor onPress={() => focusFind($)} />}
+            {Input && withTip(ui, 'focus-find', 'Find by message, author, hash or branch · S', 'left',
+              <Button key="focus-find" label="⌕" hotkey="s" plain dimColor hover={{ scope: 'tip-focus-find' }} onPress={() => focusFind($)} />)}
             {Input && (
               <Box flexGrow={1}>
                 <Input key="find" placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
@@ -1073,13 +1077,16 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
             {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
           </Box>
           <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={0}>
-            <Button key="previous" label="↑" hotkey="k" plain dimColor onPress={() => step($, -1)} />
-            <Button key="next" label="↓" hotkey="j" plain dimColor onPress={() => step($, 1)} />
-            <Button key="head" label="HEAD" hotkey="h" plain dimColor onPress={() => goHead($)} />
+            {withTip(ui, 'previous', 'Open the commit above · K', 'right',
+              <Button key="previous" label="↑" hotkey="k" plain dimColor hover={{ scope: 'tip-previous' }} onPress={() => step($, -1)} />)}
+            {withTip(ui, 'next', 'Open the commit below · J', 'right',
+              <Button key="next" label="↓" hotkey="j" plain dimColor hover={{ scope: 'tip-next' }} onPress={() => step($, 1)} />)}
+            {withTip(ui, 'head', 'Open the commit HEAD points at · H', 'right',
+              <Button key="head" label="HEAD" hotkey="h" plain dimColor hover={{ scope: 'tip-head' }} onPress={() => goHead($)} />)}
           </Box>
         </Box>
       )}
-      {settingsOpen && drawSettings(ui, $, { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers, canFetch: Boolean(graph && graph.remotes.length > 0) })}
+      {settingsOpen && drawSettings(ui, $, { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers })}
       {compareBase !== null && (
         <Box flexDirection="row" columnGap={2}>
           <Text wrap="truncate-end"><Text color="cyan">{`⇄ comparing with ${compareBase === WORKTREE ? 'the working tree' : compareBase.slice(0, HASH_WIDTH)}`}</Text><Text dimColor>  · open another commit</Text></Text>
@@ -1110,7 +1117,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
     return node === '●' ? cells : cells.map(cell => (cell.ch === '●' ? { ...cell, ch: node } : cell))
   }
   const graphWidth = Math.max(...visible.map(commit => cellsOf(commit).length)) + 1
-  const metaWidth = (showAuthor ? AUTHOR_WIDTH + 1 + (avatars ? AVATAR_WIDTH : 0) : 0) + (showDate ? DATE_WIDTH + 1 : 0)
+  // The avatar and the author's name are columns of their own: either can stand without the other
+  const metaWidth = (avatars ? AVATAR_WIDTH : 0) + (showAuthor ? AUTHOR_WIDTH + 1 : 0) + (showDate ? DATE_WIDTH + 1 : 0)
   const showMeta = metaWidth > 0 && columns >= graphWidth + metaWidth + HASH_WIDTH + 30
   const textWidth = columns - graphWidth - HASH_WIDTH - 3 - (showMeta ? metaWidth + 1 : 0)
 
@@ -1149,16 +1157,29 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 }
 
 /**
- * The settings, as a panel under the header: a line per group, its name in a dim column of its
- * own. Keys is a reference only: the Buttons the keys press stay in the header, drawn always.
+ * A button with a tip that shows while the pointer is on it: a card in the theme's inverse
+ * colors, over the rows under it, hidden until the button's hover scope lights. The button
+ * names that scope (`tip-<key>`); a surface that reports no pointer never shows it.
  */
+function withTip (ui: Ui, key: string, tip: string, align: 'left' | 'right', button: unknown) {
+  const { Box, Text } = ui
+  return (
+    <Box key={`tip-${key}`} flexShrink={0}>
+      {button}
+      <Box position="absolute" top={1} {...(align === 'right' ? { right: 0 } : { left: 0 })} display="none" hover={{ scope: `tip-${key}`, display: 'flex' }}>
+        <Text inverse wrap="end">{` ${tip} `}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+/** The settings, as a panel under the header: a line per group, its name in a dim column of its own. */
 function drawSettings (
   ui: Ui, $: Engine,
-  { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers, canFetch }: { compact: boolean; curves: boolean; avatars: boolean; showAuthor: boolean; showDate: boolean; dateFormat: DateFormat; muteMerges: boolean; muteOthers: boolean; canFetch: boolean }
+  { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers }: { compact: boolean; curves: boolean; avatars: boolean; showAuthor: boolean; showDate: boolean; dateFormat: DateFormat; muteMerges: boolean; muteOthers: boolean }
 ) {
   const { Box, Button, Text } = ui
   const check = (isOn: boolean, label: string) => `${isOn ? '☑' : '☐'} ${label}`
-  const keys = ['j next', 'k previous', 'h HEAD', ...(ui.Input ? ['s find'] : []), ...(canFetch ? ['f fetch'] : []), 'r reload', 'esc close']
   return (
     <Box key="settings-panel" flexDirection="column" marginTop={1} borderStyle="round" borderColor="gray" paddingX={1}>
       {drawSetting(ui, 'lanes', 'Lanes', [
@@ -1175,7 +1196,6 @@ function drawSettings (
         <Button key="mute-merges" label={check(muteMerges, 'merge commits')} plain onPress={() => toggleMuteMerges($)} />,
         <Button key="mute-others" label={check(muteOthers, 'commits HEAD does not reach')} plain onPress={() => toggleMuteOthers($)} />
       ])}
-      {drawSetting(ui, 'keys', 'Keys', [<Text key="keys-help" dimColor>{keys.join(' · ')}</Text>])}
     </Box>
   )
 }
@@ -1279,14 +1299,14 @@ function drawRow (
           {drawLit(Text, cut(commit.subject, room - (commit.stash ? commit.stash.length + 3 : 0)), query, { dimColor: (isMuted || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
-      {showMeta && showAuthor && (
-        <Box width={AUTHOR_WIDTH + 1 + (avatars ? AVATAR_WIDTH : 0)} flexShrink={0} marginLeft={1} flexDirection="row">
+      {showMeta && (showAuthor || avatars) && (
+        <Box width={(avatars ? AVATAR_WIDTH : 0) + (showAuthor ? AUTHOR_WIDTH + 1 : 0)} flexShrink={0} marginLeft={1} flexDirection="row">
           {avatars && commit.author !== '' && drawAvatar(ui, commit.author)}
-          <Text dimColor wrap="truncate-end">{drawLit(Text, commit.author, query, {})}</Text>
+          {showAuthor && <Text dimColor wrap="truncate-end">{drawLit(Text, commit.author, query, {})}</Text>}
         </Box>
       )}
       {showMeta && showDate && (
-        <Box width={DATE_WIDTH + 1} flexShrink={0} marginLeft={showAuthor ? 0 : 1}>
+        <Box width={DATE_WIDTH + 1} flexShrink={0} marginLeft={showAuthor || avatars ? 0 : 1}>
           <Text dimColor wrap="truncate-end">{commit.date}</Text>
         </Box>
       )}
