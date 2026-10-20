@@ -4,6 +4,13 @@ A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your br
 
 <img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src=".github/screenshot.png" />
 
+## Requirements
+
+- **Claude Code with mods.** Git Graph is a *mod*: a plugin with a hooks module, which Claude Code runs as an early-access feature. It was built and tested on Claude Code 2.1.299 (Claude Desktop's Code tab) and 2.1.304 (terminal). Where mods are turned off for an account or a build, the plugin installs but `/git-graph` does not appear.
+- **git** on the `PATH`, and a folder inside a git repository (submodules are picked from the repo picker).
+- **Claude Desktop's Code tab or the Claude Code terminal.** It is not tested in Cowork.
+- Nothing else to install: no Node, no build step. Node 22.6+ is only needed to develop it (see Development).
+
 ## Install
 
 In a terminal session:
@@ -25,6 +32,13 @@ In Claude Desktop's Code tab, where `/plugin` does not run: click **+** next to 
 Don't upload `git-graph.zip` in Settings → Plugins → Upload a plugin: that reaches Cowork, not the Code tab.
 
 Then run `/reload-plugins` (or start a new session) and `/git-graph`.
+
+### If `/git-graph` doesn't appear
+
+1. Run `/reload-plugins`, or start a new session: a session loads its plugins when it starts.
+2. Run `/plugin` and look for an error next to `git-graph`; `claude plugin list` from a shell shows whether it is installed and enabled.
+3. Check your Claude Code version with `claude --version`: older builds may not run mods, or run an older version of their API.
+4. If it is installed, enabled and error-free and still missing, mods are likely off for your account or build for now.
 
 ## Use
 
@@ -60,6 +74,26 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - **merge into current**: merges its branch, or the commit itself, into the current branch.
   - **rebase current onto this**.
   - **reset current to this**: then pick **soft** (keep the changes staged), **mixed** (keep them unstaged) or **hard** (discard them).
+
+### In motion
+
+Opening a commit: its quick links (copy the hash or the subject, its page on GitHub), its actions, its message and files, and **+ Branch…**, which hands the task to Claude.
+
+<img alt="Opening a commit in the Git Graph pane: quick links, actions, message and files" src=".github/gif-commit.gif" />
+
+The branch picker, with local branches apart from remote ones, and a branch opened from its badge: how it stands against its upstream and what it can do.
+
+<img alt="The branch picker in the Git Graph pane, then a branch opened from its badge" src=".github/gif-branches.gif" />
+
+The header's buttons, which say what they do under the pointer, and the settings: lanes, columns, date format and what is dimmed.
+
+<img alt="The Git Graph pane's header buttons and settings panel" src=".github/gif-settings.gif" />
+
+A branch's panel and a commit's open together, the lanes going on beside them.
+
+<img alt="A branch panel and a commit panel open in the Git Graph pane, with the lanes beside them" src=".github/gif-panels.gif" />
+
+### Screenshots
 
 Uncommitted changes, opened from their `*******`: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**, here with a new file's diff open.
 
