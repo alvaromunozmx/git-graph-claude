@@ -179,9 +179,14 @@ async function select ($: Engine, hash: string) {
   if ((await read($, SELECTED)) === hash) await $.state.set(DETAIL_REF, { hash, text: text.trimEnd() })
 }
 
-async function toggle ($: Engine, ref: typeof ALL_REF | typeof COMPACT_REF) {
-  await $.state.set(ref, !(await read($, ref === ALL_REF ? ALL : COMPACT)))
-  if (ref === ALL_REF) await reload($)
+// One function per value: $.state.set only takes a reference named in this file
+async function toggleAll ($: Engine) {
+  await $.state.set(ALL_REF, !(await read($, ALL)))
+  await reload($)
+}
+
+async function toggleCompact ($: Engine) {
+  await $.state.set(COMPACT_REF, !(await read($, COMPACT)))
 }
 
 async function note ($: Engine, kind: Note['kind'], text: string) {
@@ -295,8 +300,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Text dimColor>{graph && !graph.error ? `  ·  ${graph.commits.length} commits${graph.commits.length >= limit ? ` (last ${limit})` : ''}` : ''}</Text>
         </Text>
         <Box flexDirection="row" columnGap={2}>
-          <Button key="compact" label={compact ? 'compact' : 'spaced'} plain dimColor onPress={() => toggle($, COMPACT_REF)} />
-          <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggle($, ALL_REF)} />
+          <Button key="compact" label={compact ? 'compact' : 'spaced'} plain dimColor onPress={() => toggleCompact($)} />
+          <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />
           <Button key="reload" label="↻" plain onPress={() => reload($)} />
         </Box>
       </Box>
