@@ -43,6 +43,8 @@ export type Graph = {
   head: string
   /** The first remote's web address, when it has one */
   forge: Forge | null
+  /** The branch the first remote's HEAD names, which pull requests go into */
+  defaultBranch: string
   /** The session's repo and its submodules, for the repo picker: absolute paths */
   repos: { path: string; label: string }[]
   error: string | null
