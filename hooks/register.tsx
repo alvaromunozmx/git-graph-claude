@@ -324,8 +324,8 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
     let lines = shown.trimEnd().split('\n')
     let signature
     if (lines[0]?.includes(SEP)) {
-      const [status = '', signer = '', key = ''] = lines[0].split(SEP)
-      signature = describeSignature(status, signer, key)
+      const [status = '', signer = '', fingerprint = ''] = lines[0].split(SEP)
+      signature = describeSignature(status, signer, fingerprint)
       lines = lines.slice(1)
     }
     const [meta = '', ...message] = lines
