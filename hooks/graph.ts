@@ -252,6 +252,20 @@ export function splitMatch (text: string, query: string): [string, string, strin
   return at === -1 ? [text, '', ''] : [text.slice(0, at), text.slice(at, at + needle.length), text.slice(at + needle.length)]
 }
 
+/** Every commit HEAD reaches through its parents, among the ones loaded. */
+export function ancestorsOf (commits: Commit[], head: string): Set<string> {
+  const parents = new Map(commits.map(commit => [commit.hash, commit.parents]))
+  const reached = new Set<string>()
+  const queue = head ? [head] : []
+  while (queue.length > 0) {
+    const hash = queue.pop() as string
+    if (reached.has(hash) || !parents.has(hash)) continue
+    reached.add(hash)
+    queue.push(...(parents.get(hash) ?? []))
+  }
+  return reached
+}
+
 /** The cells as plain text, for tests and for the transcript fallback. */
 export function draw (commit: Commit): string {
   return commit.cells.map(cell => cell.ch).join('')
