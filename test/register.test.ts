@@ -718,3 +718,19 @@ test('an unsigned commit draws no signature line', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /signature/ })).toBeUndefined()
   expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('plain work')
 })
+
+test('an open commit keeps the lanes going beside its panel', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  // b2 sits beside c3's lane; both lanes go on down to a1
+  const desktop = await open($, 'desktop', 'b2')
+  const beside = (await desktop.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('V3800'))
+  expect(beside).toHaveLength(1)
+  expect(String(beside[0]?.props.source).match(/<path /g)).toHaveLength(2)
+  await desktop.press({ key: 'hash-b2' })
+  const terminal = await open($, 'terminal', 'b2')
+  expect(await terminal.findAll({ type: 'Text', text: /^│\n│/ })).toHaveLength(2)
+  // The last commit has nothing below it: no lanes beside its panel
+  await terminal.press({ key: 'hash-a1' })
+  expect(await terminal.findAll({ type: 'Text', text: /^│\n│/ })).toHaveLength(0)
+})
