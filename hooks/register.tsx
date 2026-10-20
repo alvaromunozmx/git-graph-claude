@@ -15,6 +15,8 @@
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow; stashes
 //   fork off the commit they were made on, to apply, pop, drop or branch from.
+// - Keys, while the pane has the focus: j and k walk the commits, h goes to HEAD, s finds,
+//   f fetches, r reloads; Esc closes the pane.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
@@ -228,6 +230,11 @@ async function clearSelection ($: Engine) {
 
 async function select ($: Engine, hash: string) {
   if ((await read($, SELECTED)) === hash) return clearSelection($)
+  await openCommit($, hash)
+}
+
+/** Opens a commit's detail, closing whichever was open. */
+async function openCommit ($: Engine, hash: string) {
   await $.state.set(SELECTED_REF, hash)
   await $.state.set(PENDING_REF, null)
   await $.state.set(DIFF_REF, null)
@@ -297,6 +304,46 @@ async function stopComparing ($: Engine) {
     await $.state.set(DIFF_REF, null)
     await $.state.set(DETAIL_REF, await readDetail($, selected))
   }
+}
+
+/** The rows the pane draws now: the ones the find field keeps, up to the page shown. */
+async function visibleRows ($: Engine) {
+  const graph = await read($, GRAPH)
+  const query = (await read($, QUERY)).trim()
+  return (graph?.commits ?? []).filter(commit => query === '' || matches(commit, query))
+}
+
+/** j and k: open the next or the previous row, showing another page when the walk reaches it. */
+async function step ($: Engine, by: 1 | -1) {
+  const rows = await visibleRows($)
+  if (rows.length === 0) return
+  const selected = await read($, SELECTED)
+  const at = rows.findIndex(commit => commit.hash === selected)
+  const next = at === -1 ? (by === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by))
+  await reveal($, next)
+  const target = rows[next]
+  if (target && target.hash !== selected) await openCommit($, target.hash)
+}
+
+/** h: open the commit HEAD points at. */
+async function goHead ($: Engine) {
+  const rows = await visibleRows($)
+  const at = rows.findIndex(commit => commit.refs.some(ref => ref.kind === 'head'))
+  if (at === -1) return note($, 'info', 'HEAD is not among the commits drawn')
+  await reveal($, at)
+  const target = rows[at]
+  if (target && target.hash !== (await read($, SELECTED))) await openCommit($, target.hash)
+}
+
+/** Shows pages until the row at `index` is drawn. */
+async function reveal ($: Engine, index: number) {
+  const shown = await read($, SHOWN)
+  if (index >= shown) await $.state.set(SHOWN_REF, (Math.floor(index / PAGE) + 1) * PAGE)
+}
+
+/** s: the focus goes to the find field. */
+async function focusFind ($: Engine) {
+  await $.ui.focus({ requestId: PANE, key: 'find' }).catch(() => undefined)
 }
 
 /** Opens one file's diff under it, or closes it when it is the one open. */
@@ -801,8 +848,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               />
               )
             : <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />}
-          {graph && graph.remotes.length > 0 && <Button key="fetch" label="⇣ fetch" plain dimColor onPress={() => fetchAll($)} />}
-          <Button key="reload" label="↻" plain onPress={() => reload($)} />
+          {graph && graph.remotes.length > 0 && <Button key="fetch" label="⇣ fetch" hotkey="f" plain dimColor onPress={() => fetchAll($)} />}
+          <Button key="reload" label="↻" hotkey="r" plain onPress={() => reload($)} />
         </Box>
       </Box>
       {ui.Input && graph && !graph.error && (
@@ -862,6 +909,14 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       {found.length > shown && (
         <Button key="more" label={`show ${Math.min(PAGE, found.length - shown)} more`} plain dimColor onPress={() => $.state.set(SHOWN_REF, shown + PAGE)} />
       )}
+      <Text> </Text>
+      <Box key="keys" flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Button key="next" label="next" hotkey="j" plain dimColor onPress={() => step($, 1)} />
+        <Button key="previous" label="previous" hotkey="k" plain dimColor onPress={() => step($, -1)} />
+        <Button key="head" label="HEAD" hotkey="h" plain dimColor onPress={() => goHead($)} />
+        {Input && <Button key="focus-find" label="find" hotkey="s" plain dimColor onPress={() => focusFind($)} />}
+        <Text dimColor>esc: close</Text>
+      </Box>
     </Box>
   )
 }

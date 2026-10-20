@@ -478,3 +478,37 @@ test('each file shows the lines it added and deleted, and the commit its totals'
     await ui.press({ key: 'hash-b2' })
   }
 })
+
+test('j and k walk the commits, h goes to HEAD', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    expect((await ui.find({ key: 'next' }))?.props.hotkey).toBe('j')
+    await ui.press({ key: 'next' })
+    expect((await ui.find({ key: 'hash-c3' }))?.props.dimColor).toBe(false)
+    await ui.press({ key: 'next' })
+    expect((await ui.find({ key: 'hash-b2' }))?.props.dimColor).toBe(false)
+    expect((await ui.find({ key: 'hash-c3' }))?.props.dimColor).toBe(true)
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'next' })
+    // The walk stops at the last commit
+    expect((await ui.find({ key: 'hash-a1' }))?.props.dimColor).toBe(false)
+    await ui.press({ key: 'previous' })
+    expect((await ui.find({ key: 'hash-b2' }))?.props.dimColor).toBe(false)
+    await ui.press({ key: 'head' })
+    expect((await ui.find({ key: 'hash-b2' }))?.props.dimColor).toBe(false)
+    await ui.press({ key: 'hash-b2' })
+  }
+})
+
+test('the walk follows the find field', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.input({ key: 'find', text: 'commit' })
+  await ui.press({ key: 'next' })
+  expect((await ui.find({ key: 'hash-b2' }))?.props.dimColor).toBe(false)
+  await ui.press({ key: 'next' })
+  expect((await ui.find({ key: 'hash-a1' }))?.props.dimColor).toBe(false)
+})
