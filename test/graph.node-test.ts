@@ -173,3 +173,11 @@ test('an author gets initials and always the same color', () => {
   assert.equal(colorIndexOf('Ana', 8), colorIndexOf('Ana', 8))
   assert.match(avatarOf('Ana <x>'), /<text [^>]*>AN<\/text>/)
 })
+
+test('a merge that ends one branch and forks another keeps them in separate lanes', () => {
+  // m0 is where the a-branch started, and it merges the s-branch: s2 must not take a's lane
+  const commits = layout(parseLog(log([['m1', 'm0 a2'], ['a2', 'a1'], ['a1', 'm0'], ['m0', 'b s2'], ['s2', 'b'], ['b', '']]), new Set()))
+  assert.deepEqual(commits.map(draw), ['●─╮', '│ ●', '│ ●', '●─╯─╮', '│   ●', '●───╯'])
+  // s2 hangs from m0's fork, not from a lane that ended above it
+  assert.equal(commits[4]?.cells.find(cell => cell.ch === '●')?.lane, 2)
+})

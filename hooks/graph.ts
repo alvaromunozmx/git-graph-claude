@@ -199,7 +199,9 @@ export function layout (commits: Commit[]): Commit[] {
     for (const parent of commit.parents.slice(1)) {
       let lane = lanes.indexOf(parent)
       if (lane === -1) {
-        lane = lanes.findIndex((hash, i) => hash === null && i !== col)
+        // Never a lane that ends in this row: one cell cannot draw a join and a fork at once,
+        // and the fork would seem to come from nowhere
+        lane = lanes.findIndex((hash, i) => hash === null && i !== col && !joining.includes(i))
         if (lane === -1) lane = lanes.length
         lanes[lane] = parent
         opened.add(lane)
