@@ -30,6 +30,9 @@ export type Graph = {
 /** The open commit: who and when, its message, and the files it changed. */
 export type Detail = { hash: string; meta: string; message: string; files: FileChange[]; isLoading?: boolean } | null
 
+/** One file's diff, opened under it in the commit's detail: unified-diff hunks, or why there are none. */
+export type Diff = { hash: string; path: string; hunks: string; note?: string; isLoading?: boolean } | null
+
 /** An action waiting for its confirming click. */
 export type Pending = { action: 'checkout' | 'cherry-pick'; hash: string }
 
@@ -41,6 +44,7 @@ declare module 'claude-code' {
       graph: Graph | null
       selected: string | null
       detail: Detail
+      diff: Diff
       allBranches: boolean
       shown: number
       compact: boolean

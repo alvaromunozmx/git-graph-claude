@@ -21,7 +21,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **spaced / compact** switches between lanes with a gap and lanes side by side.
 - **all branches / current branch** shows every branch or only the current one (also `/git-graph all` and `/git-graph current`).
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
-- **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions:
+- **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. **Click a file** to read its diff right there (merges against their first parent), and again to close it:
   - **copy hash** to the clipboard.
   - **checkout**: its local branch; or a new local branch tracking its remote one; or a detached HEAD.
   - **new branch here**: asks Claude, who asks you for the name and applies its own permissions.

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { draw, layout, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -59,4 +59,24 @@ test('the uncommitted row draws its line down to HEAD', () => {
   const commits = parseLog(log([['c', 'a'], ['b', 'a', 'HEAD -> main'], ['a', '']]), new Set())
   commits.unshift(worktreeRow([{ status: 'M', path: 'x' }], 'b'))
   assert.deepEqual(layout(commits).map(draw), ['●', '│ ●', '● │', '●─╯'])
+})
+
+test('a diff keeps its hunks and drops the header before them', () => {
+  const stdout = 'diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n one\n+two\n'
+  assert.deepEqual(parseDiff(stdout), { hunks: '@@ -1 +1,2 @@\n one\n+two' })
+})
+
+test('a diff with no hunks says why', () => {
+  assert.equal(parseDiff('diff --git a/x b/x\nBinary files a/x and b/x differ\n').note, 'Binary file: no text to compare.')
+  assert.equal(parseDiff('diff --git a/x b/x\nold mode 100644\nnew mode 100755\n').note, 'Only the file mode changed.')
+  assert.equal(parseDiff('').note, 'No changes to show.')
+})
+
+test('a long diff is cut at a hunk boundary', () => {
+  const hunk = (n: number) => `@@ -${n} +${n} @@\n-${'a'.repeat(1000)}\n+${'b'.repeat(1000)}`
+  const stdout = Array.from({ length: 100 }, (_, i) => hunk(i + 1)).join('\n')
+  const { hunks, note } = parseDiff(stdout)
+  assert.ok(hunks.length <= DIFF_LIMIT)
+  assert.ok(hunks.endsWith('b'.repeat(1000)))
+  assert.match(note ?? '', /longer than the pane shows/)
 })
