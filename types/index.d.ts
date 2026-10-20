@@ -1,5 +1,8 @@
-/** One cell of the graph column: a glyph and the lane it belongs to. */
-export type Cell = { ch: string; lane: number }
+/**
+ * One cell of the graph column: a glyph and the lane it belongs to. A commit's own cell also
+ * says whether its lane comes from above (a child waits for it) and goes on below (a parent).
+ */
+export type Cell = { ch: string; lane: number; up?: boolean; down?: boolean }
 
 export type Ref = { name: string; kind: 'head' | 'local' | 'remote' | 'tag' }
 
@@ -83,6 +86,8 @@ declare module 'claude-code' {
       compact: boolean
       /** The settings row under the header is open */
       settingsOpen: boolean
+      /** Desktop draws the lanes as curves (SVG) instead of box-drawing glyphs */
+      curves: boolean
       /** Merge commits are drawn dim */
       muteMerges: boolean
       /** Commits HEAD does not reach are drawn dim */

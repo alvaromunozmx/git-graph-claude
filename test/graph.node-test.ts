@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, commitUrl, DIFF_LIMIT, draw, forgeOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -145,4 +145,22 @@ test('messages link issue numbers and web addresses, and leave the rest', () => 
   assert.equal(linkify('Docs at https://x.dev/a?b=1.', github), 'Docs at <https://x.dev/a?b=1>.')
   assert.equal(linkify('color #fff, a&#39;s, path/#2', github), 'color #fff, a&#39;s, path/#2')
   assert.equal(linkify('Fix #3', null), 'Fix #3')
+})
+
+test('a commit cell says whether its lane comes from above and goes on below', () => {
+  const commits = layout(parseLog(log([['c', 'b'], ['b', 'a'], ['a', '']]), new Set()))
+  assert.deepEqual(commits.map(commit => { const node = commit.cells.find(cell => cell.ch === '●'); return [node?.up, node?.down] }), [[false, true], [true, true], [true, false]])
+})
+
+test('curves draw a dot per commit, a line per lane and rounded joins', () => {
+  const [merge, , , root] = layout(parseLog(log([['m', 'b f'], ['f', 'a'], ['b', 'a'], ['a', '']]), new Set()))
+  const svg = curvesOf(merge?.cells ?? [])
+  assert.match(svg, /^<svg [^>]*width="24" height="19"/)
+  assert.equal(svg.match(/<circle /g)?.length, 1)
+  // The fork to the right is a curve down into the new lane, in that lane's color
+  assert.match(svg, /<path d="M16 9.5Q20 9.5 20 19" stroke="#d9008f"/)
+  // The root's dot has a line above it and none below
+  const rootSvg = curvesOf(root?.cells ?? [])
+  assert.match(rootSvg, /M4 0V9.5/)
+  assert.doesNotMatch(rootSvg, /M4 9.5V19/)
 })

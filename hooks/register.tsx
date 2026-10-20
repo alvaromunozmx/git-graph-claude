@@ -17,11 +17,12 @@
 //   fork off the commit they were made on, to apply, pop, drop or branch from.
 // - Keys, while the pane has the focus: j and k walk the commits, h goes to HEAD, s finds,
 //   f fetches, r reloads; Esc closes the pane.
+// - On desktop the lanes can be drawn as curves, an SVG per row, instead of glyphs.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, commitUrl, FORMAT, forgeOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -43,6 +44,7 @@ const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
 const MUTE_MERGES_REF = { plugin: 'git-graph', key: 'muteMerges' } as const
+const CURVES_REF = { plugin: 'git-graph', key: 'curves' } as const
 const MUTE_OTHERS_REF = { plugin: 'git-graph', key: 'muteOthers' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
@@ -62,6 +64,7 @@ const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
 const MUTE_MERGES = atom(MUTE_MERGES_REF, true)
+const CURVES = atom(CURVES_REF, false)
 const MUTE_OTHERS = atom(MUTE_OTHERS_REF, false)
 const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
@@ -422,6 +425,10 @@ async function toggleCompact ($: Engine) {
 
 async function toggleSettings ($: Engine) {
   await $.state.set(SETTINGS_REF, !(await read($, SETTINGS)))
+}
+
+async function toggleCurves ($: Engine) {
+  await $.state.set(CURVES_REF, !(await read($, CURVES)))
 }
 
 async function toggleMuteMerges ($: Engine) {
@@ -820,8 +827,27 @@ function cut (text: string, width: number) {
   return text.length <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`
 }
 
+/**
+ * The surface's elements, with the ones it does not draw left out, so a drawing can ask for them:
+ * the terminal has no Svg, mobile no Input or Select.
+ */
+function elementsOf ($: Engine, e: RenderOf<'Pane'>): Ui {
+  const table: Ui = $.ui.resolve(e)
+  return {
+    Box: table.Box,
+    Text: table.Text,
+    Button: table.Button,
+    Link: table.Link,
+    Code: table.Code,
+    Markdown: table.Markdown,
+    Input: e.surface === 'mobile' ? undefined : table.Input,
+    Select: e.surface === 'mobile' ? undefined : table.Select,
+    Svg: e.surface === 'terminal' ? undefined : table.Svg
+  }
+}
+
 async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
-  const ui: Ui = $.ui.resolve(e)
+  const ui = elementsOf($, e)
   const { Box, Button, Input, Select, Text } = ui
   const graph = await read($, GRAPH)
   const selected = await read($, SELECTED)
@@ -832,6 +858,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const compact = await read($, COMPACT)
   const settingsOpen = await read($, SETTINGS)
   const muteMerges = await read($, MUTE_MERGES)
+  // Only a surface that draws SVG gets curves
+  const curves = Boolean(ui.Svg) && (await read($, CURVES))
   const muteOthers = await read($, MUTE_OTHERS)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
@@ -889,6 +917,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
         <Box key="settings-row" flexDirection="row" columnGap={2} flexWrap="wrap">
           <Text dimColor>lanes:</Text>
           <Button key="compact" label={compact ? 'compact' : 'spaced'} plain onPress={() => toggleCompact($)} />
+          {ui.Svg && <Button key="curves" label={curves ? 'curves' : 'glyphs'} plain onPress={() => toggleCurves($)} />}
           <Text dimColor>dim:</Text>
           <Button key="mute-merges" label={`${muteMerges ? '☑' : '☐'} merge commits`} plain onPress={() => toggleMuteMerges($)} />
           <Button key="mute-others" label={`${muteOthers ? '☑' : '☐'} commits HEAD does not reach`} plain onPress={() => toggleMuteOthers($)} />
@@ -933,7 +962,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
+    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
     if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
@@ -986,9 +1015,10 @@ function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
 }
 
 function drawRow (
-  Box: any, Button: any, Text: any, $: Engine, commit: Commit, cells: Commit['cells'],
-  { graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
+  ui: Ui, $: Engine, commit: Commit, cells: Commit['cells'],
+  { curves, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted }: { curves: boolean; graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null; isMuted: boolean }
 ) {
+  const { Box, Button, Svg, Text } = ui
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
   // Narrow panes also shorten long branch names, so the subject keeps some room.
   let room = Math.max(10, textWidth)
@@ -1002,9 +1032,17 @@ function drawRow (
 
   return (
     <Box key={commit.hash} flexDirection="row">
-      <Box width={graphWidth} flexShrink={0} flexDirection="row">
-        {cells.map((cell, i) => drawCell(Box, Text, cell.ch, cell.lane, i))}
-      </Box>
+      {curves
+        ? (
+          <Box width={graphWidth} height={1} flexShrink={0} overflow="hidden">
+            <Svg source={curvesOf(cells)} alt="" width={Math.max(1, cells.length) * CURVE_CELL.width} height={CURVE_CELL.height} />
+          </Box>
+          )
+        : (
+          <Box width={graphWidth} flexShrink={0} flexDirection="row">
+            {cells.map((cell, i) => drawCell(Box, Text, cell.ch, cell.lane, i))}
+          </Box>
+          )}
       <Box flexGrow={1} flexShrink={1} height={1} overflow="hidden" flexDirection="row">
         {refs.map(({ ref, text }) => {
           const isOpen = openRef?.kind === ref.kind && openRef.name === ref.name
