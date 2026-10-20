@@ -79,6 +79,21 @@ export function repoCandidates (entries: readonly { name: string; kind: string }
     .sort((a, b) => a.localeCompare(b))
 }
 
+/** The most options a picker takes: Claude Code refuses to draw a Select with more. */
+export const PICKER_MAX = 64
+
+/**
+ * A picker's options cut to what it takes: the first ones, with the one selected kept among them,
+ * then a line saying how many `noun` were left out, whose `sep:` value picks nothing.
+ */
+export function fitOptions<T extends { value: string; label: string }> (options: readonly T[], selected: string | undefined, noun: string, max = PICKER_MAX): { value: string; label: string }[] {
+  if (options.length <= max) return [...options]
+  const kept: { value: string; label: string }[] = options.slice(0, max - 1)
+  const chosen = options.find(option => option.value === selected)
+  if (chosen && !kept.includes(chosen)) kept[kept.length - 1] = chosen
+  return [...kept, { value: 'sep:more', label: `… ${options.length - kept.length} more ${noun}` }]
+}
+
 /** The repo `/git-graph <name>` names, by its label in the repo picker, whatever its case. */
 export function repoNamed<T extends { label: string }> (repos: readonly T[], name: string): T | undefined {
   const wanted = name.trim().toLowerCase()
