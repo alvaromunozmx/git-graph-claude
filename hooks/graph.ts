@@ -180,6 +180,7 @@ export function layout (commits: Commit[]): Commit[] {
 
   for (const commit of commits) {
     let col = lanes.indexOf(commit.hash)
+    const isAwaited = col !== -1
     if (col === -1) {
       col = lanes.indexOf(null)
       if (col === -1) col = lanes.length
@@ -214,7 +215,7 @@ export function layout (commits: Commit[]): Commit[] {
       else if (joining.includes(i)) ch = i > col ? '╯' : '╰'
       else if (opened.has(i)) ch = i > col ? '╮' : '╭'
       else if (lanes[i] !== null && lanes[i] !== undefined) ch = '│'
-      cells.push({ ch, lane: i }, { ch: ' ', lane: i })
+      cells.push(i === col ? { ch, lane: i, up: isAwaited, down: commit.parents.length > 0 } : { ch, lane: i }, { ch: ' ', lane: i })
     }
 
     // Horizontal lines from the commit to every lane that joins it or forks from it
@@ -296,6 +297,50 @@ export function linkify (message: string, forge: Forge | null): string {
     const href = issueUrl(forge, number ?? '')
     return href ? `${before ?? ''}[#${number}](${href})` : whole
   })
+}
+
+/** Git Graph's own lane colors, for the curves desktop draws. */
+export const CURVE_COLORS = ['#0085d9', '#d9008f', '#00d90a', '#d98500', '#a300d9', '#ff0000', '#00d9cc', '#e138e8']
+
+/** The size of one cell of the curves, in CSS pixels: a desktop row's height, and a lane step. */
+export const CURVE_CELL = { width: 8, height: 19 }
+
+/**
+ * One row's cells as an SVG of curves, like Git Graph draws: a line per lane, rounded joins
+ * and forks, and the commit's dot; hollow for uncommitted changes, a diamond for a stash.
+ */
+export function curvesOf (cells: Cell[]): string {
+  const { width: w, height: h } = CURVE_CELL
+  const mid = h / 2
+  const parts: string[] = []
+  const nodes: string[] = []
+  cells.forEach((cell, i) => {
+    const color = CURVE_COLORS[cell.lane % CURVE_COLORS.length]
+    const x = i * w + w / 2
+    const left = i * w
+    const right = left + w
+    const line = (d: string) => parts.push(`<path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>`)
+    switch (cell.ch) {
+      case '│': line(`M${x} 0V${h}`); break
+      case '─': line(`M${left} ${mid}H${right}`); break
+      case '┼': line(`M${left} ${mid}H${right}`); line(`M${x} 0V${h}`); break
+      case '╮': line(`M${left} ${mid}Q${x} ${mid} ${x} ${h}`); break
+      case '╭': line(`M${right} ${mid}Q${x} ${mid} ${x} ${h}`); break
+      case '╯': line(`M${x} 0Q${x} ${mid} ${left} ${mid}`); break
+      case '╰': line(`M${x} 0Q${x} ${mid} ${right} ${mid}`); break
+      case '●': case '○': case '◈':
+        if (cell.up) line(`M${x} 0V${mid}`)
+        if (cell.down) line(`M${x} ${mid}V${h}`)
+        nodes.push(cell.ch === '○'
+          ? `<circle cx="${x}" cy="${mid}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="2 1.5"/>`
+          : cell.ch === '◈'
+            ? `<rect x="${x - 3.5}" y="${mid - 3.5}" width="7" height="7" transform="rotate(45 ${x} ${mid})" fill="${color}"/>`
+            : `<circle cx="${x}" cy="${mid}" r="4" fill="${color}"/>`)
+        break
+    }
+  })
+  const width = Math.max(1, cells.length) * w
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">${parts.join('')}${nodes.join('')}</svg>`
 }
 
 /** The cells as plain text, for tests and for the transcript fallback. */

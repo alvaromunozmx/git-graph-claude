@@ -567,3 +567,28 @@ test('a message links its issues, and the commit its page, on GitHub', async ($,
     await ui.press({ key: 'hash-b2' })
   }
 })
+
+test('desktop draws the lanes as curves when the settings say so', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const desktop = await mount($, 'desktop')
+  expect(await desktop.find({ type: 'Svg' })).toBeUndefined()
+  await desktop.press({ key: 'settings' })
+  await desktop.press({ key: 'curves' })
+  const rows = await desktop.findAll({ type: 'Svg' })
+  expect(rows).toHaveLength(3)
+  expect(String(rows[0]?.props.source)).toContain('<circle')
+  // The terminal draws no SVG: it keeps the glyphs and offers no switch
+  const terminal = await mount($, 'terminal')
+  expect(await terminal.find({ key: 'curves' })).toBeUndefined()
+  expect(await terminal.find({ type: 'Text', text: '●' })).toBeDefined()
+})
+
+test('mobile draws no field or picker: the branch toggle stands in', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await $.ui.mount({ plugin: 'git-graph', surface: 'mobile', component: 'Pane', requestId: 'git-graph', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: 'second commit' })).toBeDefined()
+  expect(await ui.find({ key: 'find' })).toBeUndefined()
+  expect((await ui.find({ key: 'branches' }))?.type).toBe('Button')
+})
