@@ -6,7 +6,7 @@
 
 A Git Graph pane for Claude Code, in Claude Desktop and in the terminal: your branches, tags and remotes laid out in lanes, like the VS Code extension, next to the conversation.
 
-<img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src=".github/screenshot.png" />
+<img alt="The Git Graph pane in Claude Desktop: lanes, branches, tags, authors, dates and hashes" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/screenshot.png" />
 
 ## Requirements
 
@@ -83,43 +83,43 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 
 Opening a commit: its quick links (copy the hash or the subject, its page on GitHub), its actions, its message and files, and **+ Branch…**, which hands the task to Claude.
 
-<img alt="Opening a commit in the Git Graph pane: quick links, actions, message and files" src=".github/gif-commit.gif" />
+<img alt="Opening a commit in the Git Graph pane: quick links, actions, message and files" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/gif-commit.gif" />
 
 The branch picker, with local branches apart from remote ones, and a branch opened from its badge: how it stands against its upstream and what it can do.
 
-<img alt="The branch picker in the Git Graph pane, then a branch opened from its badge" src=".github/gif-branches.gif" />
+<img alt="The branch picker in the Git Graph pane, then a branch opened from its badge" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/gif-branches.gif" />
 
 The header's buttons, which say what they do under the pointer, and the settings: lanes, columns, date format and what is dimmed.
 
-<img alt="The Git Graph pane's header buttons and settings panel" src=".github/gif-settings.gif" />
+<img alt="The Git Graph pane's header buttons and settings panel" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/gif-settings.gif" />
 
 A branch's panel and a commit's open together, the lanes going on beside them.
 
-<img alt="A branch panel and a commit panel open in the Git Graph pane, with the lanes beside them" src=".github/gif-panels.gif" />
+<img alt="A branch panel and a commit panel open in the Git Graph pane, with the lanes beside them" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/gif-panels.gif" />
 
 ### Screenshots
 
 Uncommitted changes, opened from their `*******`: the files changed in the working tree, with **✎ Commit…**, **⊟ Stash…** and **⇄ Compare**, here with a new file's diff open.
 
-<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, one with its diff open, and buttons to commit, stash or compare them" src=".github/uncommitted.png" />
+<img alt="The uncommitted changes opened in the Git Graph pane: the files changed, one with its diff open, and buttons to commit, stash or compare them" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/uncommitted.png" />
 
 A commit, opened: its actions in groups, the author and date, its lines added and deleted, its message with links, and its files, each opening its diff.
 
-<img alt="A commit opened in the Git Graph pane: its actions, author, date, message and changed files with lines added and deleted" src=".github/commit-detail.png" />
+<img alt="A commit opened in the Git Graph pane: its actions, author, date, message and changed files with lines added and deleted" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/commit-detail.png" />
 
 A branch, opened from its badge: how it stands against its upstream, a link to open a pull request, and its actions.
 
-<img alt="The current branch opened in the Git Graph pane: in step with its upstream, a pull request link, and push, pull and rename" src=".github/branch.png" />
+<img alt="The current branch opened in the Git Graph pane: in step with its upstream, a pull request link, and push, pull and rename" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/branch.png" />
 
 The settings, open under the header: a line per group.
 
-<img alt="The settings panel of the Git Graph pane: lanes, columns and what is dimmed" src=".github/settings.png" />
+<img alt="The settings panel of the Git Graph pane: lanes, columns and what is dimmed" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/settings.png" />
 
 In the terminal, the same pane draws its lanes with box-drawing characters, which join from row to row there, and each key shows beside its button (`s:`, `k:`, `j:`, `h:`, `f:`, `r:`).
 
-<img alt="The Git Graph pane in the Claude Code terminal: lanes drawn with box-drawing characters, branches, tags, authors, dates and hashes" src=".github/terminal.png" />
+<img alt="The Git Graph pane in the Claude Code terminal: lanes drawn with box-drawing characters, branches, tags, authors, dates and hashes" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/terminal.png" />
 
-<img alt="A commit opened in the Git Graph pane in the Claude Code terminal: its actions, message and changed files" src=".github/terminal-commit.png" />
+<img alt="A commit opened in the Git Graph pane in the Claude Code terminal: its actions, message and changed files" src="https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/terminal-commit.png" />
 
 Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
@@ -156,6 +156,8 @@ Like every mod, Git Graph runs on your machine with your permissions. It has no 
 | `npm run zip` | `dist/git-graph.zip`, ready to upload in Claude Desktop |
 
 To release: `npm version patch` (or `minor`, `major`) bumps `package.json`, `plugin.json` and `marketplace.json` together and tags the commit; `git push --follow-tags` publishes a GitHub release with the zip. Users update with `/plugin marketplace update git-graph-claude`.
+
+The README's screenshots and GIFs live on the [`assets`](https://github.com/alvaromunozmx/git-graph-claude/tree/assets) branch, not next to the code, so installing the plugin doesn't download them. Add a picture there and link it as `https://raw.githubusercontent.com/alvaromunozmx/git-graph-claude/assets/<file>`.
 
 ## Changes
 
