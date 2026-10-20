@@ -12,7 +12,7 @@
       "name": "git-graph",
       "source": "./",
       "description": "Git Graph in a pane: branches, tags, remotes and each commit's details and actions, refreshed after every turn.",
-      "version": "0.3.21",
+      "version": "0.3.22",
       "category": "productivity"
     }
   ]
