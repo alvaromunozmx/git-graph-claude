@@ -77,6 +77,12 @@ The settings, open under the header: a line per group.
 
 <img alt="The settings panel of the Git Graph pane: lanes, columns and what is dimmed" src=".github/settings.png" />
 
+In the terminal, the same pane draws its lanes with box-drawing characters, which join from row to row there, and each key shows beside its button (`s:`, `k:`, `j:`, `h:`, `f:`, `r:`).
+
+<img alt="The Git Graph pane in the Claude Code terminal: lanes drawn with box-drawing characters, branches, tags, authors, dates and hashes" src=".github/terminal.png" />
+
+<img alt="A commit opened in the Git Graph pane in the Claude Code terminal: its actions, message and changed files" src=".github/terminal-commit.png" />
+
 Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
 ## Settings
