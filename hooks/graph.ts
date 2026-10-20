@@ -29,6 +29,25 @@ export function parseNameStatus (stdout: string): FileChange[] {
   })
 }
 
+/** Room for one file's diff in the pane: past it, the diff is cut at a hunk. */
+export const DIFF_LIMIT = 60000
+
+/**
+ * A `git diff` of one file → its hunks, from the first `@@` on, as a diff viewer reads them;
+ * `note` says why there are none (binary, mode only) or that the diff was cut.
+ */
+export function parseDiff (stdout: string): { hunks: string; note?: string } {
+  const start = stdout.startsWith('@@') ? 0 : stdout.indexOf('\n@@') + 1
+  if (start === 0 && !stdout.startsWith('@@')) {
+    if (/^Binary files /m.test(stdout)) return { hunks: '', note: 'Binary file: no text to compare.' }
+    return { hunks: '', note: stdout.trim() === '' ? 'No changes to show.' : 'Only the file mode changed.' }
+  }
+  const hunks = stdout.slice(start).trimEnd()
+  if (hunks.length <= DIFF_LIMIT) return { hunks }
+  const cut = hunks.lastIndexOf('\n@@', DIFF_LIMIT)
+  return { hunks: cut > 0 ? hunks.slice(0, cut) : hunks.slice(0, DIFF_LIMIT), note: `The diff is longer than the pane shows: ${Math.round(hunks.length / 1000)}k characters.` }
+}
+
 /** The row that stands for uncommitted changes, drawn above the commit it would follow. */
 export function worktreeRow (changes: FileChange[], head: string | null): Commit {
   return {

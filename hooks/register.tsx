@@ -3,6 +3,7 @@
 // - /git-graph opens a pane with the repo's history laid out in lanes, like the VS Code
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
 // - Click a hash to open that commit under its row: its files and a row of actions.
+//   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick) ask for a second click to confirm;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
 // - Uncommitted changes get a row of their own above the commit they would follow.
@@ -10,11 +11,13 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, parseLog, parseNameStatus, parseStatus, WORKTREE, worktreeRow } from './graph'
-import type { Commit, Detail, FileChange, Graph, Note, Pending, Ref } from '../types'
+import { FORMAT, layout, parseDiff, parseLog, parseNameStatus, parseStatus, WORKTREE, worktreeRow } from './graph'
+import type { Commit, Detail, Diff, FileChange, Graph, Note, Pending, Ref } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
+/** The element table of the surface drawing the pane. */
+type Ui = any
 
 const PANE = 'git-graph'
 // Rows drawn at once; "show more" adds another page
@@ -23,6 +26,7 @@ const PAGE = 40
 const GRAPH_REF = { plugin: 'git-graph', key: 'graph' } as const
 const SELECTED_REF = { plugin: 'git-graph', key: 'selected' } as const
 const DETAIL_REF = { plugin: 'git-graph', key: 'detail' } as const
+const DIFF_REF = { plugin: 'git-graph', key: 'diff' } as const
 const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
@@ -31,6 +35,7 @@ const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
+const DIFF = atom(DIFF_REF, null)
 const ALL = atom(ALL_REF, true)
 const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
@@ -119,10 +124,10 @@ export const register: Register = (on, options) => {
 
 // ── Reading the repo ───────────────────────────────────────────────────────────
 
-async function git ($: Engine, args: string[]) {
+async function git ($: Engine, args: string[], okCodes: number[] = [0]) {
   const cwd = await $.session.cwd()
   const result = await $.process.run(['git', '-C', cwd, ...args])
-  if (result.exitCode !== 0) throw new Error((result.stderr || result.stdout).trim() || `git ${args[0]} failed`)
+  if (!okCodes.includes(result.exitCode)) throw new Error((result.stderr || result.stdout).trim() || `git ${args[0]} failed`)
   return result.stdout
 }
 
@@ -172,6 +177,7 @@ async function load ($: Engine) {
 async function clearSelection ($: Engine) {
   await $.state.set(SELECTED_REF, null)
   await $.state.set(DETAIL_REF, null)
+  await $.state.set(DIFF_REF, null)
   await $.state.set(PENDING_REF, null)
 }
 
@@ -179,6 +185,7 @@ async function select ($: Engine, hash: string) {
   if ((await read($, SELECTED)) === hash) return clearSelection($)
   await $.state.set(SELECTED_REF, hash)
   await $.state.set(PENDING_REF, null)
+  await $.state.set(DIFF_REF, null)
   await $.state.set(DETAIL_REF, { hash, meta: '', message: '', files: [], isLoading: true })
   const detail = await readDetail($, hash)
   if ((await read($, SELECTED)) === hash) await $.state.set(DETAIL_REF, detail)
@@ -201,6 +208,38 @@ async function readDetail ($: Engine, hash: string): Promise<NonNullable<Detail>
     return { hash, meta, message: message.join('\n').trim(), files: parseNameStatus(names) }
   } catch (error) {
     return { hash, meta: `Could not read the commit: ${error instanceof Error ? error.message : String(error)}`, message: '', files: [] }
+  }
+}
+
+/** Opens one file's diff under it, or closes it when it is the one open. */
+async function toggleDiff ($: Engine, hash: string, file: FileChange) {
+  const open = await read($, DIFF)
+  if (open && open.hash === hash && open.path === file.path) return $.state.set(DIFF_REF, null)
+  await $.state.set(DIFF_REF, { hash, path: file.path, hunks: '', isLoading: true })
+  const diff = await readDiff($, hash, file)
+  const now = await read($, DIFF)
+  if (now?.hash === hash && now.path === file.path) await $.state.set(DIFF_REF, diff)
+}
+
+async function readDiff ($: Engine, hash: string, file: FileChange): Promise<NonNullable<Diff>> {
+  const paths = ['--', ...(file.oldPath ? [file.oldPath] : []), file.path]
+  try {
+    let stdout: string
+    if (hash === WORKTREE) {
+      // An untracked file is new against nothing; `--no-index` exits 1 when they differ
+      stdout = file.status === '?'
+        ? await git($, ['diff', '--no-index', '--', '/dev/null', file.path], [0, 1])
+        : await git($, ['diff', '-M', 'HEAD', ...paths]).catch(() => git($, ['diff', '--cached', '-M', ...paths]))
+    } else {
+      const graph = await read($, GRAPH)
+      const parent = graph?.commits.find(commit => commit.hash === hash)?.parents[0]
+      stdout = parent
+        ? await git($, ['diff', '-M', parent, hash, ...paths])
+        : await git($, ['show', '--format=', '-M', hash, ...paths])
+    }
+    return { hash, path: file.path, ...parseDiff(stdout) }
+  } catch (error) {
+    return { hash, path: file.path, hunks: '', note: `Could not read the diff: ${error instanceof Error ? error.message : String(error)}` }
   }
 }
 
@@ -311,10 +350,12 @@ function cut (text: string, width: number) {
 }
 
 async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
-  const { Box, Button, Text } = $.ui.resolve(e)
+  const ui = $.ui.resolve(e)
+  const { Box, Button, Text } = ui
   const graph = await read($, GRAPH)
   const selected = await read($, SELECTED)
   const detail = await read($, DETAIL)
+  const diff = await read($, DIFF)
   const allBranches = await read($, ALL)
   const compact = await read($, COMPACT)
   const pending = await read($, PENDING)
@@ -361,7 +402,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   for (const commit of visible) {
     const isSelected = commit.hash === selected
     rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected }))
-    if (isSelected) rows.push(drawDetail(Box, Button, Text, $, commit, detail?.hash === commit.hash ? detail : null, pending, graph, graphWidth))
+    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, graph, graphWidth))
   }
 
   return (
@@ -443,9 +484,10 @@ function drawRow (
 
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
-  Box: any, Button: any, Text: any, $: Engine, commit: Commit, detail: Detail,
+  ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
   pending: Pending | null, graph: Graph, graphWidth: number
 ) {
+  const { Box, Button, Text } = ui
   const armed = (action: Pending['action']) => pending?.action === action && pending.hash === commit.hash
   const target = checkoutTarget(commit)
   const isHead = commit.refs.some(ref => ref.kind === 'head')
@@ -475,31 +517,43 @@ function drawDetail (
       <Text> </Text>
       {!detail || detail.isLoading
         ? <Text dimColor>Loading…</Text>
-        : drawDetailBody(Box, Text, detail)}
+        : drawDetailBody(ui, $, detail, diff)}
     </Box>
   )
 }
 
-function drawDetailBody (Box: any, Text: any, detail: NonNullable<Detail>) {
+function drawDetailBody (ui: Ui, $: Engine, detail: NonNullable<Detail>, diff: Diff) {
+  const { Box, Text } = ui
   return (
     <Box flexDirection="column">
       <Text dimColor wrap="truncate-end">{detail.meta}</Text>
       {detail.message !== '' && <Text> </Text>}
       {detail.message !== '' && detail.message.split('\n').map((line, i) => <Text key={`line-${i}`} wrap="truncate-end">{line || ' '}</Text>)}
       {detail.files.length > 0 && <Text> </Text>}
-      {detail.files.map(file => drawFile(Text, file))}
+      {detail.files.map(file => drawFile(ui, $, detail.hash, file, diff?.hash === detail.hash && diff.path === file.path ? diff : null))}
     </Box>
   )
 }
 
 const STATUS_COLOR: Record<string, string> = { A: 'green', M: 'yellow', D: 'red', R: 'cyan', C: 'cyan', T: 'yellow', '?': 'green', U: 'red' }
 
-function drawFile (Text: any, file: FileChange) {
+/** A file is a button: pressing it opens its diff under it. */
+function drawFile (ui: Ui, $: Engine, hash: string, file: FileChange, diff: Diff) {
+  const { Box, Button, Code, Text } = ui
   return (
-    <Text key={`file-${file.path}`} wrap="truncate-end">
-      <Text color={STATUS_COLOR[file.status] ?? 'white'}>{`${file.status === '?' ? 'U' : file.status} `}</Text>
-      {file.oldPath ? <Text dimColor>{`${file.oldPath} → `}</Text> : ''}
-      {file.path}
-    </Text>
+    <Box key={`entry-${file.path}`} flexDirection="column">
+      <Button key={`file-${file.path}`} plain onPress={() => toggleDiff($, hash, file)}>
+        <Text color={STATUS_COLOR[file.status] ?? 'white'}>{`${diff ? '▾' : '▸'} ${file.status === '?' ? 'U' : file.status} `}</Text>
+        {file.oldPath ? <Text dimColor>{`${file.oldPath} → `}</Text> : ''}
+        {file.path}
+      </Button>
+      {diff && (
+        <Box key={`diff-${file.path}`} flexDirection="column" marginLeft={2} marginBottom={1}>
+          {diff.isLoading && <Text dimColor>Loading…</Text>}
+          {diff.hunks !== '' && <Code source={diff.hunks} format="diff" path={file.path} />}
+          {diff.note && <Text dimColor>{diff.note}</Text>}
+        </Box>
+      )}
+    </Box>
   )
 }

@@ -25,7 +25,8 @@ const REPO: Repo = {
   status: '',
   log: `${LOG}\n`,
   show: 'Alvaro <a@b.c> · 19 Oct 2026 10:00\nsecond commit\n\nThe body.\n',
-  'diff-tree': 'M\thooks/register.tsx\nA\tREADME.md\n'
+  'diff-tree': 'M\thooks/register.tsx\nA\tREADME.md\n',
+  diff: 'diff --git a/README.md b/README.md\nindex 1..2 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n line\n+added line\n'
 }
 
 /** /git-graph as the person types it at the prompt. */
@@ -118,8 +119,8 @@ test('a commit opens with its message and the files it changed', async ($, on) =
     const ui = await mount($, surface)
     await ui.press({ key: 'hash-b2' })
     expect(await ui.find({ type: 'Text', text: 'The body.' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'hooks/register.tsx' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'README.md' })).toBeDefined()
+    expect(await ui.find({ key: 'file-hooks/register.tsx' })).toBeDefined()
+    expect(await ui.find({ key: 'file-README.md' })).toBeDefined()
     // b2's files are read against its first parent
     expect(seen.git.find(args => args[0] === 'diff-tree')).toEqual(['diff-tree', '-r', '-M', '--name-status', '--no-commit-id', 'a1', 'b2'])
     await ui.press({ key: 'hash-b2' })
@@ -136,8 +137,8 @@ test('uncommitted changes get a row above HEAD that lists them', async ($, on) =
     expect(await ui.find({ type: 'Text', text: '● 2 uncommitted' })).toBeDefined()
     await ui.press({ key: 'hash-worktree' })
     expect(await ui.find({ type: 'Text', text: '2 files changed in the working tree' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'hooks/graph.ts' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'notes.md' })).toBeDefined()
+    expect(await ui.find({ key: 'file-hooks/graph.ts' })).toBeDefined()
+    expect(await ui.find({ key: 'file-notes.md' })).toBeDefined()
     await ui.press({ key: 'commit' })
     expect(seen.prompts.at(-1)).toContain('Commit the current uncommitted changes')
     await ui.press({ key: 'hash-worktree' })
@@ -149,4 +150,33 @@ test('a clean tree has no uncommitted row', async ($, on) => {
   await $.command.run(typed(''))
   const ui = await mount($, 'desktop')
   expect(await ui.find({ key: 'hash-worktree' })).toBeUndefined()
+})
+
+test('a file opens its diff under it, and closes it again', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'hash-b2' })
+    await ui.press({ key: 'file-README.md' })
+    const code = await ui.find({ type: 'Code' })
+    expect(code?.props).toMatchObject({ format: 'diff', path: 'README.md', source: '@@ -1 +1,2 @@\n line\n+added line' })
+    expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '-M', 'a1', 'b2', '--', 'README.md'])
+    await ui.press({ key: 'file-README.md' })
+    expect(await ui.find({ type: 'Code' })).toBeUndefined()
+    await ui.press({ key: 'hash-b2' })
+  }
+})
+
+test('an untracked file diffs against nothing', async ($, on) => {
+  const seen = world(on, {
+    status: '?? notes.md\n',
+    diff: { exitCode: 1, stdout: 'diff --git a/notes.md b/notes.md\nnew file mode 100644\n--- /dev/null\n+++ b/notes.md\n@@ -0,0 +1 @@\n+hello\n' }
+  })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'hash-worktree' })
+  await ui.press({ key: 'file-notes.md' })
+  expect((await ui.find({ type: 'Code' }))?.props).toMatchObject({ source: '@@ -0,0 +1 @@\n+hello' })
+  expect(seen.git.findLast(args => args[0] === 'diff')).toEqual(['diff', '--no-index', '--', '/dev/null', 'notes.md'])
 })
