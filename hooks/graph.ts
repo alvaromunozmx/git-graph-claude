@@ -158,6 +158,23 @@ export function layout (commits: Commit[]): Commit[] {
   return commits
 }
 
+/** Whether a commit matches what the find field holds: its subject, author, hash or a ref, any case. */
+export function matches (commit: Commit, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '' || commit.kind) return needle === ''
+  return commit.hash.startsWith(needle) ||
+    commit.subject.toLowerCase().includes(needle) ||
+    commit.author.toLowerCase().includes(needle) ||
+    commit.refs.some(ref => ref.name.toLowerCase().includes(needle))
+}
+
+/** A text cut in three around the first place it holds the query, for drawing that part lit. */
+export function splitMatch (text: string, query: string): [string, string, string] {
+  const needle = query.trim().toLowerCase()
+  const at = needle === '' ? -1 : text.toLowerCase().indexOf(needle)
+  return at === -1 ? [text, '', ''] : [text.slice(0, at), text.slice(at, at + needle.length), text.slice(at + needle.length)]
+}
+
 /** The cells as plain text, for tests and for the transcript fallback. */
 export function draw (commit: Commit): string {
   return commit.cells.map(cell => cell.ch).join('')

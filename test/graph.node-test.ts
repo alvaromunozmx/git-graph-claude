@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, matches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -79,4 +79,15 @@ test('a long diff is cut at a hunk boundary', () => {
   assert.ok(hunks.length <= DIFF_LIMIT)
   assert.ok(hunks.endsWith('b'.repeat(1000)))
   assert.match(note ?? '', /longer than the pane shows/)
+})
+
+test('a commit matches by subject, author, hash prefix or ref, in any case', () => {
+  const [commit] = parseLog(log([['abc123', '', 'HEAD -> feature/login']]), new Set())
+  for (const query of ['COMMIT ABC', 'alvaro', 'abc1', 'login', '  login  ', '']) assert.ok(matches(commit, query), query)
+  for (const query of ['bc12x', 'nope']) assert.ok(!matches(commit, query), query)
+})
+
+test('a match splits its text around the lit part', () => {
+  assert.deepEqual(splitMatch('Fix the Login form', 'login'), ['Fix the ', 'Login', ' form'])
+  assert.deepEqual(splitMatch('Fix it', 'nope'), ['Fix it', '', ''])
 })
