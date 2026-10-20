@@ -1,0 +1,26 @@
+name: Feature request
+description: Something the pane could show or do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The task, in your own words, and how you do it today
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How the pane could help
+      description: What you'd click or see. A sketch or a screenshot of another tool is welcome.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you'd use it
+      multiple: true
+      options:
+        - Claude Desktop (Code tab)
+        - Terminal
+        - VS Code
+        - Mobile

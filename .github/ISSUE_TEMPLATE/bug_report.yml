@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in the pane is wrong, missing or doesn't respond
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting it. A screenshot of the pane helps most; hide any email or path you'd rather not share.
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: What `claude --version` prints
+      placeholder: 2.1.299
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: git-graph version
+      description: What `claude plugin list` shows for git-graph
+      placeholder: 0.3.33
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you saw it
+      options:
+        - Claude Desktop (Code tab)
+        - Terminal
+        - VS Code
+        - Mobile
+        - More than one
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 27, Windows 11, Ubuntu 24.04
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that lead to it, starting from `/git-graph`
+      placeholder: |
+        1. Open /git-graph in a repo with ...
+        2. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag an image here. For a pane that doesn't load, the dim line under the prompt or `claude --debug` output helps too.
