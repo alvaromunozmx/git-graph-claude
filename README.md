@@ -60,10 +60,10 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
   - in a repo with submodules checked out: the repo and each submodule.
   - in a folder that is no repo but holds several, one level down (a workspace like `projects/api`, `projects/web`): each of them, with its own submodules under it. Hidden folders and `node_modules` are skipped. The first time, the pane lists them as buttons to pick one; after that it draws the one picked last in that folder. A folder with a single repo draws it straight away.
   - `/git-graph <repo>` opens the pane on that repo, by the name the picker shows (`/git-graph api`).
-- **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current. A picker holds at most 64 entries (Claude Code's limit): in a repo with more branches, the last line counts the ones left out, and the branch drawn always stays in it.
+- **The branch picker** shows every branch, only the current one, or any one branch alone, local branches listed apart from remote ones, most recently committed first (also `/git-graph all` and `/git-graph current`). Where the surface has no picker, a button toggles all and current. A picker holds at most 64 entries (Claude Code's limit): in a repo with more branches, its last line (`… 270 more branches`) opens the **branch panel**, which lists every branch, 40 at a time, with a field that finds them by name; a press draws that branch alone.
 - **⇣ fetch** fetches every remote, with its tags, pruning the branches deleted there.
 - **↻** reloads. The graph also reloads on its own whenever Claude finishes a turn.
-- **Keys**, while the pane has the focus: `j` and `k` (**↓ ↑**) open the next and the previous commit (turning the page at its edges; with none open, the first of the page), `h` (**HEAD**) the one HEAD points at, `s` (**⌕**) goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons. Under the pointer, each header button says what it does and which key presses it.
+- **Keys**, while the pane has the focus: `j` and `k` (**↓ ↑**) open the next and the previous commit (turning the page at its edges, and past the last commit loaded, loading the next ones; with none open, the first of the page), `h` (**HEAD**) the one HEAD points at, `s` (**⌕**) goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons. Under the pointer, each header button says what it does and which key presses it.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; **pull from origin/…** moves it to its upstream, fast-forward only, checked out or not, and a line says what a push and a pull would move (`↑1 to push, ↓2 to pull · origin/main`).
   - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
@@ -128,7 +128,7 @@ Actions that change the repo need a second click to confirm and wait for Claude 
 
 ## Settings
 
-`limit`: how many commits to load (150 by default). They are drawn a page of 40 at a time: **older ▾** and **▴ newer** turn the page.
+`limit`: how many commits to load (150 by default). They are drawn a page of 40 at a time: **older ▾** and **▴ newer** turn the page, both under the last row too. Where the history goes on past what was loaded, the last page offers **⇣ load 150 more**, and the lanes carry on into them; picking another repo or branch loads `limit` again.
 
 ## How it works
 

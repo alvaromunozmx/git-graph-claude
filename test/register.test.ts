@@ -661,6 +661,77 @@ test('a repo with more branches than a picker takes still draws, its picker cut 
   }
 })
 
+test('the branch picker lists the most recent branches; the rest are found in the branch panel', async ($, on) => {
+  const many = Array.from({ length: 100 }, (_, i) => `refs/heads/topic-${String(i).padStart(3, '0')}`).join('\n')
+  const seen = world(on, { 'for-each-ref': args => (args[0]?.includes('upstream') ? '' : `refs/heads/main\n${many}\n`) })
+  await $.command.run(typed(''))
+  expect(seen.git.find(args => args[0] === 'for-each-ref' && args[1] === '--format=%(refname)')).toContain('--sort=-committerdate')
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.select({ key: 'branches', value: 'sep:more' })
+    expect(await ui.find({ key: 'branch-find' }), `panel on ${surface}`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Branches · 101' }), `title on ${surface}`).toBeDefined()
+    // 40 at once, with a line counting the rest
+    expect(await ui.find({ key: 'branch-topic-038' }), 'topic-038').toBeDefined()
+    expect(await ui.find({ key: 'branch-topic-039' }), 'topic-039').toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '… 61 more: type to narrow them' }), 'more line').toBeDefined()
+    await ui.input({ key: 'branch-find', text: 'topic-09', kind: 'change' })
+    expect(await ui.find({ key: 'branch-topic-095' })).toBeDefined()
+    expect(await ui.find({ key: 'branch-main' })).toBeUndefined()
+    await ui.press({ key: 'branch-topic-095' })
+    expect(seen.git.findLast(args => args[0] === 'log')).toContain('topic-095')
+    expect(await ui.find({ key: 'branch-find' })).toBeUndefined()
+    await ui.select({ key: 'branches', value: 'all' })
+  }
+})
+
+/** A straight history of `count` commits, newest first, as `git log` reads it. */
+function history (count: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const hash = `h${String(i).padStart(4, '0')}`
+    const parent = i + 1 < count ? `h${String(i + 1).padStart(4, '0')}` : ''
+    return [hash, parent, i === 0 ? 'HEAD -> main' : '', 'Ana', '19 Oct 2026 10:00', `commit ${i}`].join(SEP)
+  }).join('\n')
+}
+
+/** A repo of 180 commits: the default 150 cut it short, and asking for more reaches its first. */
+function longRepo (on: On) {
+  return world(on, { log: args => `${history(Math.min(180, Number(args.find(arg => arg.startsWith('-n'))?.slice(2))))}\n` })
+}
+
+test('the last page of a history cut short loads the next commits, and pages back from under its rows', async ($, on) => {
+  const seen = longRepo(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: '150 commits (last 150)' })).toBeDefined()
+  for (let page = 0; page < 3; page++) await ui.press({ key: 'older' })
+  expect(await ui.find({ type: 'Text', text: '121–150 of 150' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'the history goes on past these 150' })).toBeDefined()
+  // Back from under the last row, where the reading stopped
+  expect(await ui.find({ key: 'newer-end' })).toBeDefined()
+  await ui.press({ key: 'load-more' })
+  expect(seen.git.findLast(args => args[0] === 'log')).toContain('-n300')
+  expect(await ui.find({ type: 'Text', text: '180 commits' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '121–160 of 180' })).toBeDefined()
+  await ui.press({ key: 'older' })
+  // All 180 came: nothing more to load
+  expect(await ui.find({ key: 'load-more' })).toBeUndefined()
+  await ui.press({ key: 'newer-end' })
+  expect(await ui.find({ type: 'Text', text: '121–160 of 180' })).toBeDefined()
+})
+
+test('j past the last commit loaded loads the next ones and opens the one after', async ($, on) => {
+  const seen = longRepo(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  for (let page = 0; page < 3; page++) await ui.press({ key: 'older' })
+  await ui.press({ key: 'hash-h0149' })
+  await ui.press({ key: 'next' })
+  expect(seen.git.findLast(args => args[0] === 'log')).toContain('-n300')
+  expect(await ui.find({ type: 'Text', text: 'commit 150' })).toBeDefined()
+  expect(await ui.find({ key: 'detail-h0150' })).toBeDefined()
+})
+
 test('a repo with no submodule has no repo picker', async ($, on) => {
   world(on)
   await $.command.run(typed(''))

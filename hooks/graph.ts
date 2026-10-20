@@ -79,6 +79,12 @@ export function repoCandidates (entries: readonly { name: string; kind: string }
     .sort((a, b) => a.localeCompare(b))
 }
 
+/** The branches whose name holds `query`, whatever its case; all of them for an empty one. */
+export function branchesMatching (names: readonly string[], query: string): string[] {
+  const wanted = query.trim().toLowerCase()
+  return wanted === '' ? [...names] : names.filter(name => name.toLowerCase().includes(wanted))
+}
+
 /** The most options a picker takes: Claude Code refuses to draw a Select with more. */
 export const PICKER_MAX = 64
 
