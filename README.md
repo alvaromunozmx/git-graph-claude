@@ -142,6 +142,7 @@ Like every mod, Git Graph runs on your machine with your permissions. It has no 
   - **✎ commit…**: `Commit the current uncommitted changes. Look at the diff, propose a commit message and ask me before committing.`
   - **new branch here**: `Create a new git branch from commit <hash> ("<subject>"). Ask me for the branch name first, and whether to switch to it.`, with the commit's short hash and subject.
 - **What it keeps.** Your settings (lanes, columns, dimming, date format), in Claude Code's store for the plugin, on your machine. Nothing about your repos.
+- **No credentials.** It reads no token, key or password, from the environment or from files. A signed commit's signer and key fingerprint come from `git show` and are only shown in the pane. Pushing and fetching use whatever git is already set up with, inside git.
 - **Hooks.** `session.start` registers `/git-graph` and loads your settings; `command.run` answers `/git-graph` by opening the pane; `turn.start` and `turn.complete` note when Claude is working and reload the graph when it finishes, without changing the turn; `ui.render` draws the pane, and `ui.close` clears the open commit, the find field and the page when it closes. It does not watch or change tool calls or prompts.
 - **Links.** The **↗** links (a commit's page, a pull request, `#123` in a message) are built from your first remote's address and open in your browser only when you click them. Avatars are initials drawn in the pane, not pictures fetched from the web.
 
