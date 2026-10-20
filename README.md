@@ -21,7 +21,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
 - **Stashes** (◈) fork off the commit they were made on, while every branch is drawn. Open one to **apply** it, **pop** it, make a **branch…** from it or **drop** it.
 - **⚙** opens the settings row, kept between sessions:
-  - lanes: **spaced / compact** (with a gap, or side by side) and **glyphs / curves** (in Claude Desktop, lanes drawn as SVG curves and dots, like Git Graph).
+  - lanes: **spaced / compact** (with a gap, or side by side) and **curves / glyphs** (in Claude Desktop the lanes are SVG curves and dots by default, like Git Graph; the terminal draws them with box-drawing glyphs).
   - columns: **author**, **avatars** (each author's initials on their own color; real pictures would need network access the pane does not have), **date**, and the date as **absolute** (`19 Oct 2026 10:00`), **relative** (`3 hours ago`) or **iso** (`2026-10-19 10:00`).
   - dim: **merge commits** (on by default, like Git Graph) and **commits HEAD does not reach**.
 - **The repo picker** appears when the repo has submodules checked out: pick one to draw its history, with every action working there.
