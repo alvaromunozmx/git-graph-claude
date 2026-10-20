@@ -1,6 +1,7 @@
 {
   "name": "git-graph",
-  "version": "0.3.35",
+  "version": "0.3.36",
+  "displayName": "Git Graph",
   "description": "A Git Graph pane for Claude Code: branches, tags, remotes and each commit's details, refreshed after every turn.",
   "author": {
     "name": "Alvaro Muñoz",
@@ -8,6 +9,10 @@
   },
   "homepage": "https://github.com/alvaromunozmx/git-graph-claude",
   "repository": "https://github.com/alvaromunozmx/git-graph-claude",
+  "documentationUrl": "https://github.com/alvaromunozmx/git-graph-claude#readme",
+  "supportUrl": "https://github.com/alvaromunozmx/git-graph-claude/issues/new/choose",
+  "privacyPolicyUrl": "https://github.com/alvaromunozmx/git-graph-claude/blob/main/PRIVACY.md",
+  "termsOfServiceUrl": "https://github.com/alvaromunozmx/git-graph-claude/blob/main/LICENSE",
   "license": "MIT",
   "keywords": [
     "git",

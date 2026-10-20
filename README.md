@@ -165,4 +165,4 @@ Every version and what it changed is in [CHANGELOG.md](CHANGELOG.md). To report 
 
 ## License
 
-[MIT](LICENSE) © Alvaro Muñoz
+[MIT](LICENSE) © Alvaro Muñoz. What the plugin collects (nothing) is in [PRIVACY.md](PRIVACY.md).
