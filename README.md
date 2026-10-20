@@ -69,6 +69,14 @@ A commit, opened: its actions in groups, the author and date, its lines added an
 
 <img alt="A commit opened in the Git Graph pane: its actions, author, date, message and changed files with lines added and deleted" src=".github/commit-detail.png" />
 
+A branch, opened from its badge: how it stands against its upstream, a link to open a pull request, and its actions.
+
+<img alt="The current branch opened in the Git Graph pane: in step with its upstream, a pull request link, and push, pull and rename" src=".github/branch.png" />
+
+The settings, open under the header: a line per group.
+
+<img alt="The settings panel of the Git Graph pane: lanes, columns and what is dimmed" src=".github/settings.png" />
+
 Actions that change the repo need a second click to confirm and wait for Claude to finish its turn. They refuse to run with uncommitted changes, except a soft or mixed reset. A cherry-pick, revert, merge or rebase that stops on a conflict is undone, leaving everything as it was.
 
 ## Settings
