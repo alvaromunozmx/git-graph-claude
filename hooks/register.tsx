@@ -2,6 +2,8 @@
 //
 // - /git-graph opens a pane with the repo's history laid out in lanes, like the VS Code
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
+// - Click a branch or tag badge for its actions: checkout, merge, rebase, rename, push, pull,
+//   delete, fetch, copy the name.
 // - Click a hash to open that commit under its row: its files and a row of actions.
 //   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick, revert, merge, rebase, reset) ask for
@@ -15,7 +17,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
 import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStatus, parseTagInput, splitMatch, WORKTREE, worktreeRow } from './graph'
-import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, ResetMode } from '../types'
+import type { Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode } from '../types'
 
 type Engine = EngineInterface
 type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }>
@@ -38,6 +40,8 @@ const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
 const NOTE_REF = { plugin: 'git-graph', key: 'note' } as const
 const QUERY_REF = { plugin: 'git-graph', key: 'query' } as const
 const TAGGING_REF = { plugin: 'git-graph', key: 'tagging' } as const
+const REF_REF = { plugin: 'git-graph', key: 'ref' } as const
+const RENAMING_REF = { plugin: 'git-graph', key: 'renaming' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
@@ -50,6 +54,8 @@ const PENDING = atom(PENDING_REF, null)
 const NOTE = atom(NOTE_REF, null)
 const QUERY = atom(QUERY_REF, '')
 const TAGGING = atom(TAGGING_REF, null)
+const REF = atom(REF_REF, null)
+const RENAMING = atom(RENAMING_REF, null)
 
 // One color per lane, cycling, like Git Graph's palette
 const LANE_COLORS = ['blue', 'magenta', 'green', 'yellow', 'cyan', 'red']
@@ -130,15 +136,17 @@ export const register: Register = (on, options) => {
     await $.state.set(SHOWN_REF, PAGE)
     await $.state.set(NOTE_REF, null)
     await $.state.set(QUERY_REF, '')
+    await $.state.set(REF_REF, null)
     return next(e)
   })
 }
 
 // ── Reading the repo ───────────────────────────────────────────────────────────
 
-async function git ($: Engine, args: string[], okCodes: number[] = [0]) {
+async function git ($: Engine, args: string[], okCodes: number[] = [0], timeoutMs?: number) {
   const cwd = await $.session.cwd()
-  const result = await $.process.run(['git', '-C', cwd, ...args])
+  // A remote that wants a password fails at once instead of waiting for one nobody can type
+  const result = await $.process.run(['git', '-C', cwd, ...args], { env: { GIT_TERMINAL_PROMPT: '0' }, ...(timeoutMs ? { timeoutMs } : {}) })
   if (!okCodes.includes(result.exitCode)) throw new Error((result.stderr || result.stdout).trim() || `git ${args[0]} failed`)
   return result.stdout
 }
@@ -160,7 +168,7 @@ async function load ($: Engine) {
       filter = null
       await $.state.set(FILTER_REF, null)
     }
-    const [remotes, branch, head, status, log] = await Promise.all([
+    const [remoteList, branch, head, status, log] = await Promise.all([
       git($, ['remote']),
       git($, ['branch', '--show-current']).catch(() => ''),
       git($, ['rev-parse', 'HEAD']).catch(() => ''),
@@ -170,7 +178,8 @@ async function load ($: Engine) {
         `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M', '--'
       ])
     ])
-    const parsed = parseLog(log, new Set(remotes.split('\n').map(name => name.trim()).filter(Boolean)))
+    const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
+    const parsed = parseLog(log, new Set(remotes))
     const changes = parseStatus(status)
     // The uncommitted row leads to HEAD, so the layout draws its line down to it
     const headHash = head.trim()
@@ -180,18 +189,21 @@ async function load ($: Engine) {
       branch: branch.trim() || '(detached HEAD)',
       changes,
       branches,
+      remotes,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
-  // A selected commit that is no longer in the graph loses its details
+  // A selected commit or badge that is no longer in the graph loses its details
   const selected = await read($, SELECTED)
   if (selected && !graph.commits.some(commit => commit.hash === selected)) await clearSelection($)
+  const ref = await read($, REF)
+  if (ref && !graph.commits.some(commit => commit.refs.some(item => item.kind === ref.kind && item.name === ref.name))) await selectRef($, null)
 }
 
 async function clearSelection ($: Engine) {
@@ -436,6 +448,155 @@ async function tag ($: Engine, hash: string, value: string) {
   }
 }
 
+// ── Branch and tag badges ──────────────────────────────────────────────────────
+
+/** Opens a badge's actions, or closes them when it is the one open. */
+async function selectRef ($: Engine, ref: Ref | null) {
+  const open = await read($, REF)
+  const isSame = open && ref && open.kind === ref.kind && open.name === ref.name
+  await $.state.set(REF_REF, isSame ? null : ref)
+  await $.state.set(RENAMING_REF, null)
+  const pending = await read($, PENDING)
+  if (pending && !(pending.action in COMMIT_ACTIONS)) await $.state.set(PENDING_REF, null)
+}
+
+const COMMIT_ACTIONS: Record<CommitAction, true> = { checkout: true, 'cherry-pick': true, revert: true, merge: true, rebase: true, reset: true }
+
+/** A remote branch `origin/feature/x` → its remote and its branch there. */
+function splitRemote (name: string, remotes: string[]) {
+  const remote = remotes.find(item => name.startsWith(`${item}/`)) ?? name.slice(0, name.indexOf('/'))
+  return { remote, branch: name.slice(remote.length + 1) }
+}
+
+function refConfirmText (action: RefAction, ref: Ref, graph: Graph): string {
+  const remote = graph.remotes[0] ?? 'origin'
+  switch (action) {
+    case 'checkout-ref': return ref.kind === 'remote' ? `confirm: checkout ${splitRemote(ref.name, graph.remotes).branch} tracking ${ref.name}?` : `confirm: checkout ${ref.name}?`
+    case 'merge-ref': return `confirm: merge ${ref.name} into ${graph.branch}?`
+    case 'rebase-ref': return `confirm: rebase ${graph.branch} onto ${ref.name}?`
+    case 'delete-branch': return `confirm: delete branch ${ref.name}?`
+    case 'force-delete-branch': return `confirm: delete ${ref.name} and its unmerged commits?`
+    case 'delete-remote-branch': return `confirm: delete ${ref.name} on the remote?`
+    case 'delete-tag': return `confirm: delete tag ${ref.name}?`
+    case 'push-ref': return ref.kind === 'tag' ? `confirm: push tag ${ref.name} to ${remote}?` : `confirm: push ${ref.name} to ${remote}?`
+  }
+}
+
+/** First click arms a badge's action, the second one runs it. */
+async function armRef ($: Engine, action: RefAction, ref: Ref) {
+  const pending = await read($, PENDING)
+  if (!pending || pending.action !== action || pending.hash !== ref.name) {
+    await $.state.set(PENDING_REF, { action, hash: ref.name })
+    return
+  }
+  await runRef($, action, ref)
+}
+
+async function runRef ($: Engine, action: RefAction, ref: Ref) {
+  await $.state.set(PENDING_REF, null)
+  if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
+  const graph = await read($, GRAPH)
+  if (!graph) return
+  const remote = graph.remotes[0] ?? 'origin'
+  // Deleting a ref or pushing it leaves the working tree alone; the rest want it clean
+  if (action === 'checkout-ref' || action === 'merge-ref' || action === 'rebase-ref') {
+    const dirty = (await git($, ['status', '--porcelain']).catch(() => '')).trim()
+    if (dirty) return note($, 'error', 'uncommitted changes: commit or stash them first')
+  }
+  try {
+    switch (action) {
+      case 'checkout-ref':
+        if (ref.kind === 'remote') {
+          const { branch } = splitRemote(ref.name, graph.remotes)
+          // A local branch of that name already exists: switch to it rather than fail
+          await git($, graph.branches.includes(branch) ? ['switch', branch] : ['switch', '--track', ref.name])
+        } else if (ref.kind === 'tag') {
+          await git($, ['switch', '--detach', ref.name])
+        } else {
+          await git($, ['switch', ref.name])
+        }
+        await note($, 'ok', `checked out ${ref.name}`)
+        break
+      case 'merge-ref':
+        await undoOnConflict($, ['merge', '--no-edit', ref.name], ['merge', '--abort'])
+        await note($, 'ok', `merged ${ref.name} into ${graph.branch}`)
+        break
+      case 'rebase-ref':
+        await undoOnConflict($, ['rebase', ref.name], ['rebase', '--abort'])
+        await note($, 'ok', `rebased ${graph.branch} onto ${ref.name}`)
+        break
+      case 'delete-branch':
+        try {
+          await git($, ['branch', '-d', ref.name])
+        } catch (error) {
+          // Not merged: offer to force it, which loses the commits only that branch has
+          if (/not fully merged/i.test(error instanceof Error ? error.message : '')) {
+            await $.state.set(PENDING_REF, { action: 'force-delete-branch', hash: ref.name })
+            return note($, 'error', `${ref.name} is not fully merged: press again to delete it anyway`)
+          }
+          throw error
+        }
+        await note($, 'ok', `deleted branch ${ref.name}`)
+        break
+      case 'force-delete-branch':
+        await git($, ['branch', '-D', ref.name])
+        await note($, 'ok', `deleted branch ${ref.name}`)
+        break
+      case 'delete-remote-branch': {
+        const target = splitRemote(ref.name, graph.remotes)
+        await git($, ['push', target.remote, '--delete', target.branch], [0], 120000)
+        await note($, 'ok', `deleted ${target.branch} on ${target.remote}`)
+        break
+      }
+      case 'delete-tag':
+        await git($, ['tag', '-d', ref.name])
+        await note($, 'ok', `deleted tag ${ref.name}`)
+        break
+      case 'push-ref':
+        await git($, ref.kind === 'tag' ? ['push', remote, `refs/tags/${ref.name}`] : ['push', '-u', remote, ref.name], [0], 120000)
+        await note($, 'ok', `pushed ${ref.name} to ${remote}`)
+        break
+    }
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
+/** Pull and fetch change nothing local but the branch they update: they run on one click. */
+async function pullRef ($: Engine, ref: Ref) {
+  if (isBusy) return note($, 'error', 'Claude is working: try again when the turn ends')
+  try {
+    if (ref.kind === 'remote') {
+      const graph = await read($, GRAPH)
+      const target = splitRemote(ref.name, graph?.remotes ?? [])
+      await git($, ['fetch', target.remote, target.branch], [0], 120000)
+      await note($, 'ok', `fetched ${ref.name}`)
+    } else {
+      // Only fast-forwards: a pull that would merge is Claude's to resolve
+      await git($, ['pull', '--ff-only'], [0], 120000)
+      await note($, 'ok', `pulled ${ref.name}`)
+    }
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
+async function renameBranch ($: Engine, from: string, value: string) {
+  const to = value.trim()
+  if (to === '' || to === from) return $.state.set(RENAMING_REF, null)
+  try {
+    await git($, ['branch', '-m', from, to])
+    await $.state.set(RENAMING_REF, null)
+    await $.state.set(REF_REF, null)
+    await note($, 'ok', `renamed ${from} to ${to}`)
+  } catch (error) {
+    await note($, 'error', (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '')
+  }
+  await reload($)
+}
+
 /** Writing the message is Claude's job: it proposes one and asks before committing. */
 async function commitChanges ($: Engine) {
   await ask($, 'Commit the current uncommitted changes. Look at the diff, propose a commit message and ask me before committing.', 'asked Claude to commit the changes')
@@ -476,6 +637,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const compact = await read($, COMPACT)
   const pending = await read($, PENDING)
   const tagging = await read($, TAGGING)
+  const openRef = await read($, REF)
+  const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
   const shown = await read($, SHOWN)
   const columns = Math.max(40, e.props.bodyColumns)
@@ -548,7 +711,9 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query }))
+    rows.push(drawRow(Box, Button, Text, $, commit, cellsOf(commit), { graphWidth, textWidth, showMeta, isSelected, query, openRef }))
+    const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
+    if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
     if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, tagging === commit.hash, graph, graphWidth))
   }
 
@@ -592,7 +757,7 @@ function drawCell (Box: any, Text: any, ch: string, lane: number, key: number) {
 
 function drawRow (
   Box: any, Button: any, Text: any, $: Engine, commit: Commit, cells: Commit['cells'],
-  { graphWidth, textWidth, showMeta, isSelected, query }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string }
+  { graphWidth, textWidth, showMeta, isSelected, query, openRef }: { graphWidth: number; textWidth: number; showMeta: boolean; isSelected: boolean; query: string; openRef: Ref | null }
 ) {
   const isMerge = commit.parents.length > 1
   // The text is cut to one line by hand: a narrow pane would otherwise wrap it.
@@ -600,9 +765,9 @@ function drawRow (
   let room = Math.max(10, textWidth)
   const maxRef = textWidth < 70 ? 22 : 60
   const refs = commit.refs.map(ref => {
-    const badge = `[${cut(ref.kind === 'tag' ? `◆ ${ref.name}` : ref.name, maxRef)}] `
-    const text = badge.length <= room ? badge : ''
-    room -= text.length
+    const badge = `[${cut(ref.kind === 'tag' ? `◆ ${ref.name}` : ref.name, maxRef)}]`
+    const text = badge.length + 1 <= room ? badge : ''
+    room -= text.length + (text ? 1 : 0)
     return { ref, text }
   }).filter(item => item.text)
 
@@ -611,11 +776,17 @@ function drawRow (
       <Box width={graphWidth} flexShrink={0} flexDirection="row">
         {cells.map((cell, i) => drawCell(Box, Text, cell.ch, cell.lane, i))}
       </Box>
-      <Box flexGrow={1} flexShrink={1} height={1} overflow="hidden">
+      <Box flexGrow={1} flexShrink={1} height={1} overflow="hidden" flexDirection="row">
+        {refs.map(({ ref, text }) => {
+          const isOpen = openRef?.kind === ref.kind && openRef.name === ref.name
+          // A badge is a button: its actions open under the row
+          return (
+            <Button key={`ref-${ref.kind}-${ref.name}`} plain onPress={() => selectRef($, ref)}>
+              <Text color={REF_COLOR[ref.kind]} bold={ref.kind === 'head' || isOpen} underline={isOpen}>{text}</Text>{' '}
+            </Button>
+          )
+        })}
         <Text wrap="truncate-end">
-          {refs.map(({ ref, text }, i) => (
-            <Text key={`ref-${i}`} color={REF_COLOR[ref.kind]} bold={ref.kind === 'head'}>{text}</Text>
-          ))}
           {drawLit(Text, cut(commit.subject, room), query, { dimColor: (isMerge || commit.kind === 'worktree') && !isSelected && query === '', italic: commit.kind === 'worktree', bold: isSelected })}
         </Text>
       </Box>
@@ -700,6 +871,42 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
       )}
       {isTagging && Input && (
         <Input key="tag-name" label="◆ " placeholder="v1.2  or  v1.2: message for an annotated tag" submitLabel="tag" autoFocus onSubmit={(value: string) => tag($, commit.hash, value)} />
+      )}
+    </Box>
+  )
+}
+
+/** A badge's actions, under its row: what fits its kind, and whether it is checked out. */
+function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph, graphWidth: number) {
+  const { Box, Button, Input, Text } = ui
+  const isCurrent = ref.kind === 'head'
+  const isBranch = (ref.kind === 'head' && ref.name !== 'HEAD') || ref.kind === 'local'
+  const armed = (action: RefAction) => pending?.action === action && pending.hash === ref.name
+  const guarded = (action: RefAction, label: string) => (
+    <Button key={action} label={armed(action) ? refConfirmText(action, ref, graph) : label} plain dimColor={!armed(action)} onPress={() => armRef($, action, ref)} />
+  )
+  const hasRemote = graph.remotes.length > 0
+  const actions = [
+    <Button key="copy-name" label="⧉ copy name" plain onPress={() => copyText($, ref.name, ref.name)} />,
+    !isCurrent && guarded('checkout-ref', '⎇ checkout'),
+    !isCurrent && guarded('merge-ref', '⤞ merge into current'),
+    !isCurrent && ref.kind !== 'tag' && guarded('rebase-ref', '⇡ rebase current onto this'),
+    isBranch && Input && <Button key="rename" label="✎ rename…" plain dimColor onPress={() => $.state.set(RENAMING_REF, isRenaming ? null : ref.name)} />,
+    isBranch && hasRemote && guarded('push-ref', '⇡ push'),
+    isCurrent && hasRemote && <Button key="pull" label="⇣ pull" plain dimColor onPress={() => pullRef($, ref)} />,
+    ref.kind === 'remote' && <Button key="fetch-ref" label="⇣ fetch" plain dimColor onPress={() => pullRef($, ref)} />,
+    ref.kind === 'local' && guarded(armed('force-delete-branch') ? 'force-delete-branch' : 'delete-branch', '✕ delete'),
+    ref.kind === 'remote' && guarded('delete-remote-branch', '✕ delete on remote'),
+    ref.kind === 'tag' && hasRemote && guarded('push-ref', '⇡ push tag'),
+    ref.kind === 'tag' && guarded('delete-tag', '✕ delete tag')
+  ].filter(Boolean)
+
+  return (
+    <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginLeft={graphWidth} marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
+      <Text color={REF_COLOR[ref.kind]} wrap="truncate-end">{`${ref.kind === 'tag' ? '◆ tag' : ref.kind === 'remote' ? 'remote branch' : isCurrent ? 'current branch' : 'branch'} ${ref.name}`}</Text>
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
+      {isRenaming && Input && (
+        <Input key="rename-branch" label="✎ " value={ref.name} submitLabel="rename" autoFocus onSubmit={(value: string) => renameBranch($, ref.name, value)} />
       )}
     </Box>
   )
