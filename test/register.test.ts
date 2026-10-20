@@ -802,8 +802,9 @@ test('the keys answer with the settings closed: their buttons stay in the header
     }
     const all = (await ui.findAll({ type: 'Button' })).map(button => button.props.hotkey).filter(Boolean)
     expect(all.sort()).toEqual(Object.values(hotkeys).sort())
-    // The branch in the header is the h button
-    expect((await ui.find({ key: 'head' }))?.text).toContain('⎇ main')
+    // The branch in the header is text, with no key chip beside it; HEAD sits with the walk's arrows
+    expect(await ui.find({ type: 'Text', text: '⎇ main' })).toBeDefined()
+    expect((await ui.find({ key: 'head' }))?.props.label).toBe('HEAD')
     // No row of keys at the bottom any more
     expect(await ui.find({ key: 'keys' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /esc/ })).toBeUndefined()

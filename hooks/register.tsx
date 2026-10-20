@@ -1029,16 +1029,11 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       )}
       {/* Where the repo stands on the left, what changes the view on the right; a narrow pane wraps the two */}
       <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap={2}>
+        {/* Where the repo stands: text alone, so no hotkey chip sits among it */}
         <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={1}>
-          {/* The branch is h: it opens the commit HEAD points at. j and k walk from there; they are drawn
-              here, always, because a Button's hotkey only answers while the Button is drawn */}
-          {graph?.branch
-            ? <Button key="head" hotkey="h" plain onPress={() => goHead($)}><Text color="green" bold>{`⎇ ${graph.branch}`}</Text></Button>
-            : <Text bold>Git Graph</Text>}
+          <Text color="green" bold wrap="truncate-end">{graph?.branch ? `⎇ ${graph.branch}` : 'Git Graph'}</Text>
           {graph && graph.changes.length > 0 && <Text color="yellow">{`● ${graph.changes.length} uncommitted`}</Text>}
           {isDrawn && <Text dimColor>{`${count} commits${count >= limit ? ` (last ${limit})` : ''}`}</Text>}
-          {isDrawn && <Button key="previous" label="↑" hotkey="k" plain dimColor onPress={() => step($, -1)} />}
-          {isDrawn && <Button key="next" label="↓" hotkey="j" plain dimColor onPress={() => step($, 1)} />}
         </Box>
         <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={0}>
           {Select && graph && graph.branches.length > 0
@@ -1063,15 +1058,25 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
           <Button key="settings" label={settingsOpen ? '⚙ settings ▾' : '⚙ settings'} plain dimColor={!settingsOpen} onPress={() => toggleSettings($)} />
         </Box>
       </Box>
-      {Input && isDrawn && (
-        <Box flexDirection="row" columnGap={1} alignItems="center">
-          {/* The magnifier is s: it puts the focus in the field */}
-          <Button key="focus-find" label="⌕" hotkey="s" plain dimColor onPress={() => focusFind($)} />
-          <Box flexGrow={1}>
-            <Input key="find" placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
+      {/* Finding on the left, walking the rows on the right. The walk's buttons are drawn here,
+          always, because a Button's hotkey only answers while the Button is drawn */}
+      {isDrawn && (
+        <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap={2} marginTop={1}>
+          <Box flexDirection="row" columnGap={1} alignItems="center" flexGrow={1} flexShrink={1}>
+            {Input && <Button key="focus-find" label="⌕" hotkey="s" plain dimColor onPress={() => focusFind($)} />}
+            {Input && (
+              <Box flexGrow={1}>
+                <Input key="find" placeholder="find a message, author, hash or branch" value={typed} submitLabel="find" onInput={(value: string) => find($, value)} onSubmit={(value: string) => find($, value)} />
+              </Box>
+            )}
+            {query !== '' && <Text dimColor>{`${matching} ${matching === 1 ? 'match' : 'matches'}`}</Text>}
+            {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
           </Box>
-          {query !== '' && <Text dimColor>{`${matching} ${matching === 1 ? 'match' : 'matches'}`}</Text>}
-          {query !== '' && <Button key="find-clear" label="✕ clear" plain dimColor onPress={() => find($, '')} />}
+          <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={0}>
+            <Button key="previous" label="↑" hotkey="k" plain dimColor onPress={() => step($, -1)} />
+            <Button key="next" label="↓" hotkey="j" plain dimColor onPress={() => step($, 1)} />
+            <Button key="head" label="HEAD" hotkey="h" plain dimColor onPress={() => goHead($)} />
+          </Box>
         </Box>
       )}
       {settingsOpen && drawSettings(ui, $, { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers, canFetch: Boolean(graph && graph.remotes.length > 0) })}

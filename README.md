@@ -29,7 +29,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 ## Use
 
 - `/git-graph` opens the pane: commits laid out in lanes, with the checked-out branch, local and remote branches and tags (◆) as badges, plus author, date and hash. It adapts to the pane's width.
-- **The header** reads in one line: on the left the current branch (`⎇ main`, click it or press `h` to open the commit HEAD points at), how many files have uncommitted changes, how many commits are drawn, and **↑ ↓** to walk them; on the right the branch picker, **⇣ fetch**, **↻** and **⚙ settings**. A narrow pane wraps the right side under the left.
+- **The header** has two lines. The first says where the repo stands (`⎇ main`, how many files have uncommitted changes, how many commits are drawn), with the branch picker, **⇣ fetch**, **↻** and **⚙ settings** on the right. The second finds (**⌕** and the find field) on the left and walks the rows on the right: **↑ ↓** for the previous and next commit and **HEAD** for the commit HEAD points at. A narrow pane wraps each line's right side under its left.
 - A finished action (checkout, merge, push…) says so in a toast, since the pane already shows what it changed. The line under the header keeps errors, until the next action, and what is under way (`fetching…`).
 - **⌕** and the find field keep only the commits whose message, author, hash or branch and tag names hold the text, lit where they match. **✕ clear** shows them all again.
 - **Uncommitted Changes** get a row of their own (○) above the commit they would follow. Click its `*` to list the changed files; **✎ commit…** has Claude propose a message and commit them, and **⊟ stash…** stashes them, untracked files included, with an optional message.
