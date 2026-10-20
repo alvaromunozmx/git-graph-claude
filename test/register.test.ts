@@ -692,3 +692,23 @@ test('a branch links to a pull request into the remote HEAD branch', async ($, o
     await ui.press({ key: 'ref-head-main' })
   }
 })
+
+test('a signed commit says who signed it, and whether git trusts it', async ($, on) => {
+  world(on, { show: `G${SEP}Alvaro <a@b.c>${SEP}ABC123\nAlvaro <a@b.c> · today\nsigned work\n` })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await open($, surface, 'b2')
+    const line = await ui.find({ type: 'Text', text: '✓ good signature by Alvaro <a@b.c> (key ABC123)' })
+    expect(line?.props.color).toBe('green')
+    expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('signed work')
+    await ui.press({ key: 'hash-b2' })
+  }
+})
+
+test('an unsigned commit draws no signature line', async ($, on) => {
+  world(on, { show: `N${SEP}${SEP}\nAlvaro <a@b.c> · today\nplain work\n` })
+  await $.command.run(typed(''))
+  const ui = await open($, 'desktop', 'b2')
+  expect(await ui.find({ type: 'Text', text: /signature/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('plain work')
+})
