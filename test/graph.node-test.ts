@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -190,4 +190,8 @@ test('a line passing through a join keeps going, in its own color, to the commit
   const svg = curvesOf(commits[3]?.cells ?? [])
   assert.match(svg, /<path d="M16 9.5H24" stroke="#00d90a"/)
   assert.match(svg, /<path d="M20 0Q20 9.5 16 9.5" stroke="#d9008f"/)
+})
+
+test('submodules checked out are listed, the ones not initialized left out', () => {
+  assert.deepEqual(parseSubmodules(' 1a2b lib/core (heads/main)\n+5e6f vendor/x (v1)\n-3c4d lib/unused\nU7a8b broken\n'), ['lib/core', 'vendor/x', 'broken'])
 })

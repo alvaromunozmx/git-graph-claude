@@ -23,7 +23,7 @@ const REPO: Repo = {
   remote: 'origin\n',
   'for-each-ref': 'refs/heads/main\nrefs/heads/feature\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\n',
   branch: 'main\n',
-  'rev-parse': 'b2\n',
+  'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'b2\n'),
   status: '',
   log: `${LOG}\n`,
   show: 'Alvaro <a@b.c> · 19 Oct 2026 10:00\nsecond commit\n\nThe body.\n',
@@ -38,7 +38,7 @@ const typed = (args: string) =>
 /** The engine beneath the mod: a repo on `main`, and a record of what the mod asked for. */
 function world (on: On, repo: Repo = {}) {
   const answers: Repo = { ...REPO, ...repo }
-  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][], prompts: [] as string[] }
+  const seen = { commands: [] as string[], opened: [] as string[], git: [] as string[][], prompts: [] as string[], cwds: [] as string[] }
   mock.clock(on, { now: 0 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
@@ -55,8 +55,10 @@ function world (on: On, repo: Repo = {}) {
     return { text: e.text }
   })
   on('process.run', ($, e) => {
-    const [, , cwd, command = '', ...args] = e.argv
-    expect(cwd).toBe(CWD)
+    const [, , cwd = '', command = '', ...args] = e.argv
+    // Every git call runs in the repo, or in one of its submodules
+    expect(cwd.startsWith(CWD)).toBe(true)
+    seen.cwds.push(cwd)
     seen.git.push([command, ...args])
     const found = answers[command] ?? ''
     const answer = typeof found === 'function' ? found(args) : found
@@ -521,7 +523,7 @@ test('the settings dim merges, and commits HEAD does not reach', async ($, on) =
     ['b2', 'a1', '', 'Alvaro', '19 Oct 2026 10:00', 'second commit'],
     ['a1', '', '', 'Alvaro', '18 Oct 2026 09:00', 'first commit']
   ].map(row => row.join(SEP)).join('\n')
-  world(on, { log, 'rev-parse': 'm4\n' })
+  world(on, { log, 'rev-parse': args => (args[0] === '--show-toplevel' ? `${CWD}\n` : 'm4\n') })
   await $.command.run(typed(''))
   for (const surface of SURFACES) {
     const ui = await mount($, surface)
@@ -605,4 +607,26 @@ test('each author has an avatar, which the settings can hide', async ($, on) => 
   await terminal.press({ key: 'settings' })
   await terminal.press({ key: 'avatars' })
   expect(await terminal.find({ type: 'Text', text: 'AN' })).toBeUndefined()
+})
+
+test('a repo with submodules gets a repo picker that draws each one', async ($, on) => {
+  const seen = world(on, { submodule: ' 1a2b lib/core (heads/main)\n-3c4d lib/unused\n' })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    const picker = await ui.find({ key: 'repo' })
+    expect((picker?.props.options as { value: string; label: string }[])).toEqual([{ value: CWD, label: 'repo' }, { value: `${CWD}/lib/core`, label: 'lib/core' }])
+    await ui.select({ key: 'repo', value: `${CWD}/lib/core` })
+    expect(seen.cwds.at(-1)).toBe(`${CWD}/lib/core`)
+    expect((await ui.find({ key: 'repo' }))?.props.value).toBe(`${CWD}/lib/core`)
+    await ui.select({ key: 'repo', value: CWD })
+    expect(seen.cwds.at(-1)).toBe(CWD)
+  }
+})
+
+test('a repo with no submodule has no repo picker', async ($, on) => {
+  world(on)
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ key: 'repo' })).toBeUndefined()
 })

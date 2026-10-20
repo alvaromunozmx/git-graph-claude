@@ -11,6 +11,7 @@
 //   a second click to confirm; a tag is named in a field under the commit;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
 // - ⇣ fetch brings every remote's branches and tags, pruning the ones deleted there.
+// - A repo with submodules gets a repo picker: each submodule's history draws the same way.
 // - The branch picker draws every branch, the current one, or any one branch alone.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow; stashes
@@ -22,7 +23,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -40,6 +41,7 @@ const DETAIL_REF = { plugin: 'git-graph', key: 'detail' } as const
 const DIFF_REF = { plugin: 'git-graph', key: 'diff' } as const
 const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
 const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
+const REPO_REF = { plugin: 'git-graph', key: 'repo' } as const
 const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const SETTINGS_REF = { plugin: 'git-graph', key: 'settingsOpen' } as const
@@ -61,6 +63,7 @@ const DETAIL = atom(DETAIL_REF, null)
 const DIFF = atom(DIFF_REF, null)
 const ALL = atom(ALL_REF, true)
 const FILTER = atom(FILTER_REF, null)
+const REPO = atom(REPO_REF, null)
 const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const SETTINGS = atom(SETTINGS_REF, false)
@@ -164,8 +167,12 @@ export const register: Register = (on, options) => {
 
 // ── Reading the repo ───────────────────────────────────────────────────────────
 
+/** Runs git in the repo drawn: the session's, or the submodule picked. */
 async function git ($: Engine, args: string[], okCodes: number[] = [0], timeoutMs?: number) {
-  const cwd = await $.session.cwd()
+  return gitIn($, (await read($, REPO)) ?? (await $.session.cwd()), args, okCodes, timeoutMs)
+}
+
+async function gitIn ($: Engine, cwd: string, args: string[], okCodes: number[] = [0], timeoutMs?: number) {
   // A remote that wants a password fails at once instead of waiting for one nobody can type
   const result = await $.process.run(['git', '-C', cwd, ...args], { env: { GIT_TERMINAL_PROMPT: '0' }, ...(timeoutMs ? { timeoutMs } : {}) })
   if (!okCodes.includes(result.exitCode)) throw new Error((result.stderr || result.stdout).trim() || `git ${args[0]} failed`)
@@ -202,6 +209,7 @@ async function load ($: Engine) {
         `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M', '--'
       ])
     ])
+    const repos = await listRepos($)
     const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
     const forge = remotes[0] ? forgeOf(await git($, ['remote', 'get-url', remotes[0]]).catch(() => '')) : null
     const parsed = withStashes(parseLog(log, new Set(remotes)), parseStashes(stashList))
@@ -217,12 +225,13 @@ async function load ($: Engine) {
       remotes,
       head: headHash,
       forge,
+      repos,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -400,6 +409,27 @@ async function readDiff ($: Engine, hash: string, file: FileChange): Promise<Non
 async function toggleAll ($: Engine) {
   await $.state.set(ALL_REF, !(await read($, ALL)))
   await $.state.set(FILTER_REF, null)
+  await reload($)
+}
+
+/** The session's repo, then each submodule checked out in it, deepest last. */
+async function listRepos ($: Engine) {
+  const cwd = await $.session.cwd()
+  const root = (await gitIn($, cwd, ['rev-parse', '--show-toplevel']).catch(() => '')).trim()
+  if (root === '') return []
+  const submodules = parseSubmodules(await gitIn($, root, ['submodule', 'status', '--recursive']).catch(() => ''))
+  return [{ path: root, label: root.split('/').at(-1) ?? root }, ...submodules.map(path => ({ path: `${root}/${path}`, label: path }))]
+}
+
+/** Draws another repo: what was open, picked or compared there does not carry over. */
+async function pickRepo ($: Engine, path: string) {
+  const graph = await read($, GRAPH)
+  await $.state.set(REPO_REF, path === graph?.repos[0]?.path ? null : path)
+  await $.state.set(FILTER_REF, null)
+  await $.state.set(COMPARE_REF, null)
+  await $.state.set(REF_REF, null)
+  await $.state.set(SHOWN_REF, PAGE)
+  await clearSelection($)
   await reload($)
 }
 
@@ -861,6 +891,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const diff = await read($, DIFF)
   const allBranches = await read($, ALL)
   const filter = await read($, FILTER)
+  const repo = await read($, REPO)
   const compact = await read($, COMPACT)
   const settingsOpen = await read($, SETTINGS)
   const muteMerges = await read($, MUTE_MERGES)
@@ -885,6 +916,15 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 
   const header = (
     <Box key="header" flexDirection="column">
+      {Select && graph && graph.repos.length > 1 && (
+        <Select
+          key="repo"
+          label="repo "
+          value={repo ?? graph.repos[0]?.path}
+          options={graph.repos.map(item => ({ value: item.path, label: item.label }))}
+          onSelect={(value: string) => pickRepo($, value)}
+        />
+      )}
       <Box flexDirection="row" justifyContent="space-between">
         <Text wrap="truncate-end">
           <Text color="green">{graph?.branch ? `⎇ ${graph.branch}` : 'Git Graph'}</Text>
