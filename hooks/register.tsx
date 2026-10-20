@@ -25,7 +25,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -99,6 +99,9 @@ const DATE_WIDTH = 17
 const HASH_WIDTH = 7
 // What a row's lanes say to a reader that cannot see them
 const LANES_ALT = 'graph'
+// How far the lanes beside an open panel reach: the panel's own height clips them
+const PANEL_ROWS = 200
+const LANE_DOWN = Array.from({ length: PANEL_ROWS }, () => '│').join('\n')
 // An avatar and the space after it
 const AVATAR_WIDTH = 3
 
@@ -1105,10 +1108,14 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const rows = []
   for (const commit of visible) {
     const isSelected = commit.hash === selected
-    rows.push(drawRow(ui, $, commit, cellsOf(commit), { curves: curves && query === '', avatars, showAuthor, showDate, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
+    const cells = cellsOf(commit)
+    const isCurved = curves && query === ''
+    rows.push(drawRow(ui, $, commit, cells, { curves: isCurved, avatars, showAuthor, showDate, graphWidth, textWidth, showMeta, isSelected, query, openRef, isMuted: isMuted(commit) }))
     const badge = openRef && commit.refs.find(ref => ref.kind === openRef.kind && ref.name === openRef.name)
-    if (badge) rows.push(drawRefActions(ui, $, badge, pending, renaming === badge.name, graph, graphWidth))
-    if (isSelected) rows.push(drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph, graphWidth))
+    // A panel opened under a row keeps the lanes going beside it, down to the next commit
+    const underRow = query === '' ? cells : []
+    if (badge) rows.push(drawBeside(ui, `refs-${badge.kind}-${badge.name}`, underRow, isCurved, graphWidth, drawRefActions(ui, $, badge, pending, renaming === badge.name, graph)))
+    if (isSelected) rows.push(drawBeside(ui, `detail-${commit.hash}`, underRow, isCurved, graphWidth, drawDetail(ui, $, commit, detail?.hash === commit.hash ? detail : null, diff, pending, { isTagging: tagging === commit.hash, isStashing: stashing === commit.hash, compareBase }, graph)))
   }
 
   return (
@@ -1237,10 +1244,37 @@ function drawRow (
   )
 }
 
+/**
+ * A panel under a row, with the lanes that go on below the row drawn down its left side. The
+ * lanes stand apart from the layout and are clipped to the panel's height, whatever it comes to.
+ */
+function drawBeside (ui: Ui, key: string, cells: Cell[], curves: boolean, graphWidth: number, panel: unknown) {
+  const { Box, Svg, Text } = ui
+  return (
+    <Box key={`beside-${key}`} flexDirection="row">
+      <Box width={graphWidth} flexShrink={0} />
+      <Box position="absolute" top={0} left={0} width={graphWidth} height="100%" overflow="hidden">
+        {curves
+          ? <Svg source={linesDownOf(cells, PANEL_ROWS)} alt={LANES_ALT} width={Math.max(1, cells.length) * CURVE_CELL.width} height={PANEL_ROWS * CURVE_CELL.height} />
+          : (
+            <Box flexDirection="row">
+              {cells.map((cell, i) => (
+                <Box key={i} width={1} flexShrink={0}>
+                  <Text color={LANE_COLORS[cell.lane % LANE_COLORS.length]}>{goesDown(cell) ? LANE_DOWN : ' '}</Text>
+                </Box>
+              ))}
+            </Box>
+            )}
+      </Box>
+      <Box flexGrow={1} flexShrink={1} flexDirection="column">{panel}</Box>
+    </Box>
+  )
+}
+
 /** The open commit, under its own row: actions, then its message and files. */
 function drawDetail (
   ui: Ui, $: Engine, commit: Commit, detail: Detail, diff: Diff,
-  pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean; compareBase: string | null }, graph: Graph, graphWidth: number
+  pending: Pending | null, fields: { isTagging: boolean; isStashing: boolean; compareBase: string | null }, graph: Graph
 ) {
   const { Box, Button, Text } = ui
   const isBase = fields.compareBase === commit.hash
@@ -1250,7 +1284,7 @@ function drawDetail (
   const isWorktree = commit.kind === 'worktree'
 
   return (
-    <Box key={`detail-${commit.hash}`} flexDirection="column" marginLeft={graphWidth} marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box key={`detail-${commit.hash}`} flexDirection="column" marginTop={1} marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="yellow" wrap="truncate-end">{isWorktree ? 'Uncommitted Changes' : commit.stash ? `${commit.stash}  ${commit.hash}` : commit.hash}</Text>
       {compareButton}
       {isWorktree
@@ -1343,7 +1377,7 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
 }
 
 /** A badge's actions, under its row: what fits its kind, and whether it is checked out. */
-function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph, graphWidth: number) {
+function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph) {
   const { Box, Button, Input, Link, Text } = ui
   const isCurrent = ref.kind === 'head'
   const branchName = ref.kind === 'remote' ? splitRemote(ref.name, graph.remotes).branch : ref.name
@@ -1371,7 +1405,7 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
   ].filter(Boolean)
 
   return (
-    <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginLeft={graphWidth} marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
+    <Box key={`refs-${ref.kind}-${ref.name}`} flexDirection="column" marginBottom={1} borderStyle="round" borderColor={REF_COLOR[ref.kind]} paddingX={1}>
       <Text color={REF_COLOR[ref.kind]} wrap="truncate-end">{`${ref.kind === 'tag' ? '◆ tag' : ref.kind === 'remote' ? 'remote branch' : isCurrent ? 'current branch' : 'branch'} ${ref.name}`}</Text>
       <Box flexDirection="row" columnGap={2} flexWrap="wrap">{actions}</Box>
       {isRenaming && Input && (

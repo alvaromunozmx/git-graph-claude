@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, describeSignature, DIFF_LIMIT, draw, forgeOf, goesDown, initialsOf, linesDownOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -209,4 +209,15 @@ test('a signature reads as git checked it; an unsigned commit has none', () => {
   assert.deepEqual(describeSignature('B', '', 'ABC123'), { text: '✗ bad signature (key ABC123)', kind: 'bad' })
   assert.equal(describeSignature('E', '', 'K')?.kind, 'unchecked')
   assert.equal(describeSignature('N', '', ''), undefined)
+})
+
+test('the lanes that go on below a row are drawn straight down beside a panel', () => {
+  // b sits beside c's lane; a is the root both lead to
+  const [, b, a] = layout(parseLog(log([['c', 'a'], ['b', 'a'], ['a', '']]), new Set()))
+  assert.deepEqual(b?.cells.map(goesDown), [true, false, true])
+  assert.deepEqual(a?.cells.filter(goesDown), [])
+  const svg = linesDownOf(b?.cells ?? [], 10)
+  assert.match(svg, /height="190"/)
+  assert.equal(svg.match(/<path /g)?.length, 2)
+  assert.match(svg, /<path d="M17.5 0V190" stroke="#d9008f"/)
 })

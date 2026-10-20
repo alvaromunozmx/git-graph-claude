@@ -423,6 +423,25 @@ export function avatarOf (name: string, size = 16): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/><text x="${r}" y="${r}" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="${size * 0.45}" font-weight="600" fill="#fff">${text}</text></svg>`
 }
 
+/** Whether a cell's lane goes on below its row: a lane, a crossing, a fork, or a commit with a parent. */
+export function goesDown (cell: Cell): boolean {
+  if (cell.ch === '│' || cell.ch === '┼' || cell.ch === '╮' || cell.ch === '╭') return true
+  return (cell.ch === '●' || cell.ch === '○' || cell.ch === '◈') && cell.down === true
+}
+
+/**
+ * The lanes that go on below a row, as straight lines `rows` rows tall: drawn beside a panel
+ * opened under that row, so the lanes reach the next commit through it.
+ */
+export function linesDownOf (cells: Cell[], rows: number): string {
+  const { width: w, height: h } = CURVE_CELL
+  const lines = cells.map((cell, i) => (goesDown(cell)
+    ? `<path d="M${i * w + w / 2} 0V${rows * h}" stroke="${CURVE_COLORS[cell.lane % CURVE_COLORS.length]}" stroke-width="2"/>`
+    : '')).join('')
+  const width = Math.max(1, cells.length) * w
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${rows * h}" viewBox="0 0 ${width} ${rows * h}">${lines}</svg>`
+}
+
 /** A join or fork that a line passes through draws as a tee: `╮` becomes `┬`, `╯` becomes `┴`. */
 export function glyphOf (cell: Cell): string {
   if (cell.across === undefined) return cell.ch
