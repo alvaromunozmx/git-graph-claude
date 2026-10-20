@@ -1,6 +1,6 @@
 {
   "name": "git-graph",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "displayName": "Git Graph",
   "description": "A Git Graph pane for Claude Code: branches, tags, remotes and each commit's details, refreshed after every turn.",
   "author": {
