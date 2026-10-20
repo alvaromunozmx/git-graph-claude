@@ -33,8 +33,11 @@ export type Graph = {
   loadedAt: number
 }
 
-/** The open commit: who and when, its message, and the files it changed. */
-export type Detail = { hash: string; meta: string; message: string; files: FileChange[]; isLoading?: boolean } | null
+/**
+ * The open commit: who and when, its message, and the files it changed; or, while a compare is
+ * on, the files that changed from the older of the two commits to the newer.
+ */
+export type Detail = { hash: string; meta: string; message: string; files: FileChange[]; isLoading?: boolean; compare?: { from: string; to: string } } | null
 
 /** One file's diff, opened under it in the commit's detail: unified-diff hunks, or why there are none. */
 export type Diff = { hash: string; path: string; hunks: string; note?: string; isLoading?: boolean } | null
@@ -76,6 +79,8 @@ declare module 'claude-code' {
       renaming: string | null
       /** What a stash field is open for: stashing the changes, or a branch from a stash (its hash) */
       stashing: string | null
+      /** The commit marked to compare others with */
+      compareBase: string | null
       /** The commit whose tag field is open */
       tagging: string | null
       /** What the find field holds: rows that match it are the only ones drawn */
