@@ -31,6 +31,7 @@ Then run `/reload-plugins` (or start a new session) and `/git-graph`.
 - **Keys**, while the pane has the focus: `j` and `k` open the next and the previous commit, `h` the one HEAD points at, `s` goes to the find field, `f` fetches, `r` reloads, `Esc` closes the pane. Tab and the arrows walk the buttons.
 - **Click a branch or tag badge** to open its actions under the row:
   - a branch: **checkout**, **merge into current**, **rebase current onto this**, **rename…**, **push** (setting its upstream), **delete** (asking again before it deletes unmerged commits), **copy name**; the current branch also **pull**s (fast-forward only).
+  - on GitHub, GitLab or Bitbucket, a branch other than the remote's default also links to **↗ pull request into** that default branch.
   - a remote branch: **checkout** (a local branch tracking it), **merge into current**, **rebase current onto this**, **fetch**, **delete on remote**.
   - a tag: **checkout** (detached), **merge into current**, **push tag**, **delete tag**.
 - **Click a hash** to open the commit under its row: full hash, author, date, message, changed files and these actions. Each file shows its status (A, M, D, R) and the lines it added and deleted, and the commit its totals. **Click a file** to read its diff right there (merges against their first parent), and again to close it:

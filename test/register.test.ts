@@ -675,3 +675,20 @@ test('the settings are kept for the next session', async ($, on) => {
   await ui.press({ key: 'avatars' })
   expect(kept.settings).toMatchObject({ compact: true, avatars: false, dateFormat: 'iso' })
 })
+
+test('a branch links to a pull request into the remote HEAD branch', async ($, on) => {
+  world(on, {
+    remote: args => (args[0] === 'get-url' ? 'https://github.com/o/r.git\n' : 'origin\n'),
+    'symbolic-ref': 'origin/main\n'
+  })
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    await ui.press({ key: 'ref-remote-origin/feature' })
+    expect((await ui.find({ type: 'Link' }))?.props).toMatchObject({ href: 'https://github.com/o/r/compare/main...feature?expand=1', label: '↗ pull request into main' })
+    // The default branch itself opens none
+    await ui.press({ key: 'ref-head-main' })
+    expect(await ui.find({ type: 'Link' })).toBeUndefined()
+    await ui.press({ key: 'ref-head-main' })
+  }
+})

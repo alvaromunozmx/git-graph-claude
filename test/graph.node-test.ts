@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, curvesOf, DIFF_LIMIT, draw, forgeOf, initialsOf, linkify, pullRequestUrl, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseRefs, parseStashes, parseStatus, parseSubmodules, parseTagInput, SEP, splitMatch, summary, withStashes, withStats, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -194,4 +194,12 @@ test('a line passing through a join keeps going, in its own color, to the commit
 
 test('submodules checked out are listed, the ones not initialized left out', () => {
   assert.deepEqual(parseSubmodules(' 1a2b lib/core (heads/main)\n+5e6f vendor/x (v1)\n-3c4d lib/unused\nU7a8b broken\n'), ['lib/core', 'vendor/x', 'broken'])
+})
+
+test('a branch opens a pull request on its forge, never into itself', () => {
+  assert.equal(pullRequestUrl(forgeOf('git@github.com:o/r.git'), 'feat/x', 'main'), 'https://github.com/o/r/compare/main...feat/x?expand=1')
+  assert.equal(pullRequestUrl(forgeOf('https://gitlab.com/o/r'), 'fix', 'main'), 'https://gitlab.com/o/r/-/merge_requests/new?merge_request%5Bsource_branch%5D=fix&merge_request%5Btarget_branch%5D=main')
+  assert.equal(pullRequestUrl(forgeOf('https://bitbucket.org/o/r'), 'fix', 'dev'), 'https://bitbucket.org/o/r/pull-requests/new?source=fix&dest=dev')
+  assert.equal(pullRequestUrl(forgeOf('git@github.com:o/r.git'), 'main', 'main'), null)
+  assert.equal(pullRequestUrl(null, 'fix', 'main'), null)
 })

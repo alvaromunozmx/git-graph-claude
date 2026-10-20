@@ -3,7 +3,7 @@
 // - /git-graph opens a pane with the repo's history laid out in lanes, like the VS Code
 //   extension: branches, remotes and tags as badges, author, date and hash per commit.
 // - Click a branch or tag badge for its actions: checkout, merge, rebase, rename, push, pull,
-//   delete, fetch, copy the name.
+//   delete, fetch, copy the name, and a link to open a pull request on GitHub, GitLab or Bitbucket.
 // - Click a hash to open that commit under its row: its files and a row of actions. Mark one
 //   to compare, and every commit opened next lists what changed between the two.
 //   Click a file to read its diff right there.
@@ -24,7 +24,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, FORMAT, forgeOf, glyphOf, initialsOf, layout, linkify, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, pullRequestUrl, splitMatch, STASH_FORMAT, summary, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -222,6 +222,9 @@ async function load ($: Engine) {
     const repos = await listRepos($)
     const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
     const forge = remotes[0] ? forgeOf(await git($, ['remote', 'get-url', remotes[0]]).catch(() => '')) : null
+    // Where pull requests go: the remote's HEAD, else main or master, whichever exists
+    const remoteHead = remotes[0] ? (await git($, ['symbolic-ref', '--short', `refs/remotes/${remotes[0]}/HEAD`]).catch(() => '')).trim() : ''
+    const defaultBranch = remoteHead ? remoteHead.slice(remoteHead.indexOf('/') + 1) : branches.includes('master') && !branches.includes('main') ? 'master' : 'main'
     const parsed = withStashes(parseLog(log, new Set(remotes)), parseStashes(stashList))
     const changes = parseStatus(status)
     // The uncommitted row leads to HEAD, so the layout draws its line down to it
@@ -235,13 +238,14 @@ async function load ($: Engine) {
       remotes,
       head: headHash,
       forge,
+      defaultBranch,
       repos,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], remotes: [], head: '', forge: null, defaultBranch: 'main', repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -1326,8 +1330,10 @@ function drawCommitActions (ui: Ui, $: Engine, commit: Commit, pending: Pending 
 
 /** A badge's actions, under its row: what fits its kind, and whether it is checked out. */
 function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, isRenaming: boolean, graph: Graph, graphWidth: number) {
-  const { Box, Button, Input, Text } = ui
+  const { Box, Button, Input, Link, Text } = ui
   const isCurrent = ref.kind === 'head'
+  const branchName = ref.kind === 'remote' ? splitRemote(ref.name, graph.remotes).branch : ref.name
+  const pullRequest = ref.kind !== 'tag' && ref.name !== 'HEAD' ? pullRequestUrl(graph.forge, branchName, graph.defaultBranch) : null
   const isBranch = (ref.kind === 'head' && ref.name !== 'HEAD') || ref.kind === 'local'
   const armed = (action: RefAction) => pending?.action === action && pending.hash === ref.name
   const guarded = (action: RefAction, label: string) => (
@@ -1336,6 +1342,7 @@ function drawRefActions (ui: Ui, $: Engine, ref: Ref, pending: Pending | null, i
   const hasRemote = graph.remotes.length > 0
   const actions = [
     <Button key="copy-name" label="⧉ copy name" plain onPress={() => copyText($, ref.name, ref.name)} />,
+    pullRequest && <Link key="pull-request" href={pullRequest} label={`↗ pull request into ${graph.defaultBranch}`} />,
     !isCurrent && guarded('checkout-ref', '⎇ checkout'),
     !isCurrent && guarded('merge-ref', '⤞ merge into current'),
     !isCurrent && ref.kind !== 'tag' && guarded('rebase-ref', '⇡ rebase current onto this'),

@@ -313,6 +313,18 @@ export function issueUrl (forge: Forge | null, number: string): string | null {
   return `${forge.base}${forge.kind === 'gitlab' ? '/-/issues/' : '/issues/'}${number}`
 }
 
+/** The page that opens a pull (or merge) request from `branch` into `into`, where the forge is known. */
+export function pullRequestUrl (forge: Forge | null, branch: string, into: string): string | null {
+  if (!forge || forge.kind === 'other' || branch === into) return null
+  const from = encodeURIComponent(branch)
+  const to = encodeURIComponent(into)
+  if (forge.kind === 'gitlab') return `${forge.base}/-/merge_requests/new?merge_request%5Bsource_branch%5D=${from}&merge_request%5Btarget_branch%5D=${to}`
+  if (forge.kind === 'bitbucket') return `${forge.base}/pull-requests/new?source=${from}&dest=${to}`
+  // GitHub reads the branches in the path, where a branch's slashes stay slashes
+  const path = (name: string) => name.split('/').map(encodeURIComponent).join('/')
+  return `${forge.base}/compare/${path(into)}...${path(branch)}?expand=1`
+}
+
 /** A commit message as markdown: its web addresses and `#123` issue numbers become links. */
 export function linkify (message: string, forge: Forge | null): string {
   return message.replace(/(https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"])|(^|[^\w&/#])#(\d+)\b/gm, (whole, url: string | undefined, before: string | undefined, number: string | undefined) => {
