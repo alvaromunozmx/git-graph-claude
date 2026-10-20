@@ -6,13 +6,14 @@
 //   Click a file to read its diff right there.
 // - Actions that change the repo (checkout, cherry-pick) ask for a second click to confirm;
 //   "new branch" hands the task to Claude, so it asks for the name and its own permission.
+// - The branch picker draws every branch, the current one, or any one branch alone.
 // - The find field keeps only the commits whose message, author, hash or refs hold the text.
 // - Uncommitted changes get a row of their own above the commit they would follow.
 // - The graph reloads after every turn, so commits Claude makes show up on their own.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
-import { FORMAT, layout, matches, parseDiff, parseLog, parseNameStatus, parseStatus, splitMatch, WORKTREE, worktreeRow } from './graph'
+import { FORMAT, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseStatus, splitMatch, WORKTREE, worktreeRow } from './graph'
 import type { Commit, Detail, Diff, FileChange, Graph, Note, Pending, Ref } from '../types'
 
 type Engine = EngineInterface
@@ -29,6 +30,7 @@ const SELECTED_REF = { plugin: 'git-graph', key: 'selected' } as const
 const DETAIL_REF = { plugin: 'git-graph', key: 'detail' } as const
 const DIFF_REF = { plugin: 'git-graph', key: 'diff' } as const
 const ALL_REF = { plugin: 'git-graph', key: 'allBranches' } as const
+const FILTER_REF = { plugin: 'git-graph', key: 'branchFilter' } as const
 const SHOWN_REF = { plugin: 'git-graph', key: 'shown' } as const
 const COMPACT_REF = { plugin: 'git-graph', key: 'compact' } as const
 const PENDING_REF = { plugin: 'git-graph', key: 'pending' } as const
@@ -39,6 +41,7 @@ const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
 const DIFF = atom(DIFF_REF, null)
 const ALL = atom(ALL_REF, true)
+const FILTER = atom(FILTER_REF, null)
 const SHOWN = atom(SHOWN_REF, PAGE)
 const COMPACT = atom(COMPACT_REF, false)
 const PENDING = atom(PENDING_REF, null)
@@ -75,8 +78,10 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'git-graph' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
-    if (arg === 'all' || arg === 'current') await $.state.set(ALL_REF, arg === 'all')
-    else if (arg !== '') return { text: 'Usage: /git-graph [all | current]' }
+    if (arg === 'all' || arg === 'current') {
+      await $.state.set(ALL_REF, arg === 'all')
+      await $.state.set(FILTER_REF, null)
+    } else if (arg !== '') return { text: 'Usage: /git-graph [all | current]' }
     await reload($)
     isOpen = true
     await $.ui.open({ id: PANE, title: 'Git Graph', focus: true, closeOnEscape: true })
@@ -143,16 +148,23 @@ function reload ($: Engine): Promise<void> {
 
 async function load ($: Engine) {
   const allBranches = await read($, ALL)
+  let filter = await read($, FILTER)
   let graph: Graph
   try {
+    const branches = parseBranches(await git($, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes']).catch(() => ''))
+    // A picked branch that was deleted since: back to the branches the toggle says
+    if (filter !== null && !branches.includes(filter)) {
+      filter = null
+      await $.state.set(FILTER_REF, null)
+    }
     const [remotes, branch, head, status, log] = await Promise.all([
       git($, ['remote']),
       git($, ['branch', '--show-current']).catch(() => ''),
       git($, ['rev-parse', 'HEAD']).catch(() => ''),
       git($, ['status', '--porcelain=v1', '-uall']).catch(() => ''),
       git($, [
-        'log', ...(allBranches ? ['--all'] : []), '--topo-order', `-n${limit}`,
-        `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M'
+        'log', ...(filter !== null ? [filter] : allBranches ? ['--all'] : []), '--topo-order', `-n${limit}`,
+        `--format=${FORMAT}`, '--date=format:%d %b %Y %H:%M', '--'
       ])
     ])
     const parsed = parseLog(log, new Set(remotes.split('\n').map(name => name.trim()).filter(Boolean)))
@@ -164,12 +176,13 @@ async function load ($: Engine) {
       commits: layout(parsed),
       branch: branch.trim() || '(detached HEAD)',
       changes,
+      branches,
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { commits: [], branch: '', changes: [], branches: [], error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -250,6 +263,19 @@ async function readDiff ($: Engine, hash: string, file: FileChange): Promise<Non
 // One function per value: $.state.set only takes a reference named in this file
 async function toggleAll ($: Engine) {
   await $.state.set(ALL_REF, !(await read($, ALL)))
+  await $.state.set(FILTER_REF, null)
+  await reload($)
+}
+
+/** The branch picker's value: `all`, `current`, or `ref:<branch>` to draw that branch alone. */
+async function pickBranches ($: Engine, value: string) {
+  if (value === 'all' || value === 'current') {
+    await $.state.set(ALL_REF, value === 'all')
+    await $.state.set(FILTER_REF, null)
+  } else {
+    await $.state.set(FILTER_REF, value.slice(4))
+  }
+  await $.state.set(SHOWN_REF, PAGE)
   await reload($)
 }
 
@@ -361,12 +387,13 @@ function cut (text: string, width: number) {
 
 async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const ui: Ui = $.ui.resolve(e)
-  const { Box, Button, Input, Text } = ui
+  const { Box, Button, Input, Select, Text } = ui
   const graph = await read($, GRAPH)
   const selected = await read($, SELECTED)
   const detail = await read($, DETAIL)
   const diff = await read($, DIFF)
   const allBranches = await read($, ALL)
+  const filter = await read($, FILTER)
   const compact = await read($, COMPACT)
   const pending = await read($, PENDING)
   const lastNote = await read($, NOTE)
@@ -388,7 +415,20 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
         </Text>
         <Box flexDirection="row" columnGap={2}>
           <Button key="compact" label={compact ? 'compact' : 'spaced'} plain dimColor onPress={() => toggleCompact($)} />
-          <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />
+          {Select && graph && graph.branches.length > 0
+            ? (
+              <Select
+                key="branches"
+                value={filter !== null ? `ref:${filter}` : allBranches ? 'all' : 'current'}
+                options={[
+                  { value: 'all', label: 'all branches' },
+                  { value: 'current', label: 'current branch' },
+                  ...graph.branches.map(name => ({ value: `ref:${name}`, label: name }))
+                ]}
+                onSelect={(value: string) => pickBranches($, value)}
+              />
+              )
+            : <Button key="branches" label={allBranches ? 'all branches' : 'current branch'} plain dimColor onPress={() => toggleAll($)} />}
           <Button key="reload" label="↻" plain onPress={() => reload($)} />
         </Box>
       </Box>

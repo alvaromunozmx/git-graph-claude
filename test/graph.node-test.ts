@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { DIFF_LIMIT, draw, layout, matches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
+import { DIFF_LIMIT, draw, layout, matches, parseBranches, parseDiff, parseLog, parseNameStatus, parseRefs, parseStatus, SEP, splitMatch, worktreeRow } from '../hooks/graph.ts'
 
 const log = (rows: [string, string, string?][]) =>
   rows.map(([hash, parents, refs = '']) => [hash, parents, refs, 'Alvaro', '19 Oct 2026 10:00', `commit ${hash}`].join(SEP)).join('\n')
@@ -90,4 +90,8 @@ test('a commit matches by subject, author, hash prefix or ref, in any case', () 
 test('a match splits its text around the lit part', () => {
   assert.deepEqual(splitMatch('Fix the Login form', 'login'), ['Fix the ', 'Login', ' form'])
   assert.deepEqual(splitMatch('Fix it', 'nope'), ['Fix it', '', ''])
+})
+
+test('branches list local ones first and leave the remotes HEAD out', () => {
+  assert.deepEqual(parseBranches('refs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/heads/main\nrefs/heads/feat/x\n'), ['main', 'feat/x', 'origin/main'])
 })

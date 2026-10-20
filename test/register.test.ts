@@ -20,6 +20,7 @@ type Repo = Record<string, Answer | ((args: string[]) => Answer)>
 
 const REPO: Repo = {
   remote: 'origin\n',
+  'for-each-ref': 'refs/heads/main\nrefs/heads/feature\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\n',
   branch: 'main\n',
   'rev-parse': 'b2\n',
   status: '',
@@ -202,4 +203,34 @@ test('the find field keeps the commits that match, lit', async ($, on) => {
     expect(await ui.find({ key: 'hash-a1' })).toBeDefined()
     expect(await ui.find({ key: 'hash-b2' })).toBeDefined()
   }
+})
+
+test('the branch picker draws one branch alone, or all of them again', async ($, on) => {
+  const seen = world(on)
+  await $.command.run(typed(''))
+  for (const surface of SURFACES) {
+    const ui = await mount($, surface)
+    const picker = await ui.find({ key: 'branches' })
+    expect(picker?.props.value).toBe('all')
+    expect((picker?.props.options as { value: string }[]).map(option => option.value)).toEqual(['all', 'current', 'ref:main', 'ref:feature', 'ref:origin/main'])
+    await ui.select({ key: 'branches', value: 'ref:feature' })
+    expect(seen.git.findLast(args => args[0] === 'log')?.[1]).toBe('feature')
+    expect((await ui.find({ key: 'branches' }))?.props.value).toBe('ref:feature')
+    await ui.select({ key: 'branches', value: 'current' })
+    expect(seen.git.findLast(args => args[0] === 'log')).not.toContain('--all')
+    await ui.select({ key: 'branches', value: 'all' })
+    expect(seen.git.findLast(args => args[0] === 'log')).toContain('--all')
+  }
+})
+
+test('a picked branch that is gone falls back to every branch', async ($, on) => {
+  let refs = 'refs/heads/main\nrefs/heads/feature\n'
+  const seen = world(on, { 'for-each-ref': () => refs })
+  await $.command.run(typed(''))
+  const ui = await mount($, 'desktop')
+  await ui.select({ key: 'branches', value: 'ref:feature' })
+  refs = 'refs/heads/main\n'
+  await ui.press({ key: 'reload' })
+  expect(seen.git.findLast(args => args[0] === 'log')).toContain('--all')
+  expect((await ui.find({ key: 'branches' }))?.props.value).toBe('all')
 })
