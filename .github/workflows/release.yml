@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          # The newest patch of the line, not the runner's cached one: 24.22.1 fixes CVE-2026-111497
+          check-latest: true
+      - run: node --version
       - run: npm run test:node
       - run: npm run zip
       # The tag's section of CHANGELOG.md is the release's notes; GitHub adds the merged changes under it

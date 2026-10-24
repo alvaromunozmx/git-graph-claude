@@ -11,6 +11,8 @@ Every version of Git Graph for Claude Code, newest first. Each release on GitHub
 - **Added:** **▴ newer** under the last row too, beside **older ▾** and the range, so a page turns back from where the reading stopped
 - **Fixed:** A repo with more than about 60 branches drew nothing: Claude Code refuses a picker with more than 64 options, so the branch and repo pickers now show the first ones, keep the one drawn, and count the rest on their last line
 - **Docs:** The README and PRIVACY.md say how the pane finds the repos in a folder, and that it keeps the last one picked
+- **Docs:** A security audit against the October 2026 Node.js release (CVE-2026-111497) and the Railway and Stripe notices, in docs/security-audit/
+- **Chores:** CI takes the newest Node patch of each line (`check-latest`), says which one ran, reads the repo only, runs on develop too, and installs a fixed Claude Code (2.1.304)
 
 ## 0.3.36 — 2026-10-20
 
