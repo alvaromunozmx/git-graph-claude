@@ -76,7 +76,7 @@ Revisión del repo `alvaromunozmx/git-graph-claude`, solo lectura:
 ## 6. Actividades a realizar en git-graph
 
 **Prioridad alta**
-1. **Actualizar Node local** de v22.15.0 a **22.23.4** o más reciente, o a **24.22.1** o más reciente. `engines` ya pide `>=22.6`, así que cualquiera de las dos funciona.
+1. ✅ **Actualizar Node local.** Hecho el 2026-10-26: **v24.22.1** con nvm (`~/.nvm/versions/node/v24.22.1`, alias `default` → 24). Se quitó el anterior v22.15.0 de `/usr/local/bin` y no queda otro Node en el `PATH`. Las pruebas pasan con esta versión: 41 de Node, 69 del mod, `validate` y `npm run zip`.
 2. ✅ **Fijar versiones con parche en CI.** Hecho en `develop`: `check-latest: true` en cada `actions/setup-node` de `test.yml` y `release.yml`, con un paso `node --version` que lo deja escrito en el log. `test.yml` ahora también corre en push a `develop`, para comprobarlo sin tocar `main`. Confirmado en la corrida `40123330965` sobre `develop` (2026-10-24): los 7 jobs pasaron con **v22.23.4** y **v24.22.1**, y el job `mod` instaló `@anthropic-ai/claude-code@2.1.304`.
 3. ✅ **Actualizar Claude Code.** Hecho el 2026-10-26: el CLI pasó de 2.1.304 a **2.1.310** con `claude update`. Queda pendiente: no encontré en sus notas públicas si esa versión cambia el runtime por este aviso. La pestaña Code de Claude Desktop trae su propio Claude Code, que se actualiza al actualizar la app; `/status` ahí muestra la versión.
 
