@@ -2,7 +2,7 @@
 
 Every version of Git Graph for Claude Code, newest first. Each release on GitHub carries its section as its notes.
 
-## 0.4.0 — 2026-10-20
+## 0.4.0 — 2026-11-06
 
 - **Added:** A folder that holds several repos, one level down, gets a repo picker with each of them and their submodules; the first time it asks for one, then draws the one picked last in that folder
 - **Added:** `/git-graph <repo>` opens the pane on that repo, by the name the repo picker shows
