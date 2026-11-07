@@ -30,7 +30,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, EventOf, Register } from 'claude-code'
 
 import { checkoutCommit, checkoutRemote, git as cmd, splitRemote } from './commands'
-import { ancestorsOf, avatarOf, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, describeUpstream, FORMAT, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, parseUpstreams, pullRequestUrl, SEP, SIGNATURE_FORMAT, splitBranches, splitMatch, STASH_FORMAT, summary, UPSTREAM_FORMAT, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
+import { ancestorsOf, avatarOf, branchesMatching, colorIndexOf, commitUrl, CURVE_CELL, curvesOf, DATE_ARGS, describeSignature, describeUpstream, FORMAT, fitOptions, forgeOf, glyphOf, goesDown, initialsOf, layout, linesDownOf, linkify, matches, parseDiff, parseLog, parseNameStatus, parseNumstat, parseStashes, parseStatus, parseSubmodules, parseTagInput, parseUpstreams, pullRequestUrl, repoCandidates, repoNamed, SEP, SIGNATURE_FORMAT, splitBranches, splitMatch, STASH_FORMAT, summary, UPSTREAM_FORMAT, withStashes, withStats, WORKTREE, worktreeRow } from './graph'
 import type { Cell, Commit, CommitAction, DateFormat, Detail, Diff, FileChange, Graph, Note, Pending, Ref, RefAction, ResetMode, StashAction } from '../types'
 
 type Engine = EngineInterface
@@ -39,6 +39,7 @@ type RenderOf<C extends string> = Extract<EventOf['ui.render'], { component: C }
 type Ui = any
 
 const PANE = 'git-graph'
+const USAGE = 'Usage: /git-graph [all | current | <repo>]'
 // Rows drawn at once: older and newer pages replace them. Every row goes to the surface on each
 // redraw, so the page keeps that bounded however long the history is
 const PAGE = 40
@@ -69,6 +70,9 @@ const REF_REF = { plugin: 'git-graph', key: 'ref' } as const
 const STASHING_REF = { plugin: 'git-graph', key: 'stashing' } as const
 const COMPARE_REF = { plugin: 'git-graph', key: 'compareBase' } as const
 const RENAMING_REF = { plugin: 'git-graph', key: 'renaming' } as const
+const BRANCHES_OPEN_REF = { plugin: 'git-graph', key: 'branchesOpen' } as const
+const BRANCH_QUERY_REF = { plugin: 'git-graph', key: 'branchQuery' } as const
+const LOAD_LIMIT_REF = { plugin: 'git-graph', key: 'loadLimit' } as const
 const GRAPH = atom(GRAPH_REF, null)
 const SELECTED = atom(SELECTED_REF, null)
 const DETAIL = atom(DETAIL_REF, null)
@@ -97,6 +101,11 @@ const REF = atom(REF_REF, null)
 const STASHING = atom(STASHING_REF, null)
 const COMPARE = atom(COMPARE_REF, null)
 const RENAMING = atom(RENAMING_REF, null)
+const BRANCHES_OPEN = atom(BRANCHES_OPEN_REF, false)
+const BRANCH_QUERY = atom(BRANCH_QUERY_REF, '')
+const LOAD_LIMIT = atom(LOAD_LIMIT_REF, null as number | null)
+// Branches the branch panel lists at once: the field narrows the rest
+const BRANCH_LIST = 40
 
 // One color per lane, cycling, like Git Graph's palette
 const LANE_COLORS = ['blue', 'magenta', 'green', 'yellow', 'cyan', 'red']
@@ -135,12 +144,21 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'git-graph' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
-    if (arg === 'all' || arg === 'current') {
-      await $.state.set(ALL_REF, arg === 'all')
+    const arg = e.args.trim()
+    const word = arg.toLowerCase()
+    if (word === 'all' || word === 'current') {
+      await $.state.set(ALL_REF, word === 'all')
       await $.state.set(FILTER_REF, null)
-    } else if (arg !== '') return { text: 'Usage: /git-graph [all | current]' }
-    await reload($)
+      await reload($)
+    } else if (arg !== '') {
+      // A repo's name, from the repo picker: that repo drawn
+      const { repos, inFolder } = await listRepos($)
+      const repo = repoNamed(repos, arg)
+      if (!repo) {
+        return { text: repos.length > 1 ? `No repo named “${arg}” here. Repos: ${repos.map(item => item.label).join(', ')}` : USAGE }
+      }
+      await pickRepo($, repo.path, { inFolder, own: repos[0]?.path })
+    } else await reload($)
     isOpen = true
     await $.ui.open({ id: PANE, title: 'Git Graph', focus: true, closeOnEscape: true })
     // The pane is the answer: nothing for the transcript or the model
@@ -187,6 +205,7 @@ export const register: Register = (on, options) => {
     await $.state.set(QUERY_REF, '')
     await $.state.set(REF_REF, null)
     await $.state.set(COMPARE_REF, null)
+    await $.state.set(BRANCHES_OPEN_REF, false)
     return next(e)
   })
 }
@@ -215,9 +234,26 @@ async function load ($: Engine) {
   const allBranches = await read($, ALL)
   const dateFormat = await read($, DATE_FORMAT)
   let filter = await read($, FILTER)
+  const loadLimit = (await read($, LOAD_LIMIT)) ?? limit
+  const { repos, inFolder } = await listRepos($).catch(() => ({ repos: [], inFolder: false }))
+  const empty = { commits: [], branch: '', changes: [], branches: [], localCount: 0, upstreams: {}, remotes: [], head: '', forge: null, defaultBranch: 'main', repos, ...(inFolder ? { inFolder: true as const } : {}) }
+  let repo = await read($, REPO)
+  // A repo picked that is gone since: back to none
+  if (repo !== null && !repos.some(item => item.path === repo)) {
+    repo = null
+    await $.state.set(REPO_REF, null)
+  }
+  // A folder of repos draws the one picked there last, or its only one; else it asks for one
+  if (inFolder && repo === null) {
+    repo = (await rememberedRepo($, repos)) ?? (repos.length === 1 ? repos[0]?.path ?? null : null)
+    if (repo !== null) await $.state.set(REPO_REF, repo)
+  }
   let graph: Graph
-  try {
-    const [local, remote] = splitBranches(await git($, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes']).catch(() => ''))
+  if (inFolder && repo === null) {
+    const error = repos.length === 0 ? 'This folder is not a git repository, and none of its folders is one.' : null
+    graph = { ...empty, error, loadedAt: await $.clock.now() }
+  } else try {
+    const [local, remote] = splitBranches(await git($, ['for-each-ref', '--format=%(refname)', '--sort=-committerdate', 'refs/heads', 'refs/remotes']).catch(() => ''))
     const branches = [...local, ...remote]
     const upstreams = parseUpstreams(await git($, ['for-each-ref', `--format=${UPSTREAM_FORMAT}`, 'refs/heads']).catch(() => ''))
     // A picked branch that was deleted since: back to the branches the toggle says
@@ -234,11 +270,10 @@ async function load ($: Engine) {
       filter === null && allBranches ? git($, ['stash', 'list', `--format=${STASH_FORMAT}`, DATE_ARGS[dateFormat]]).catch(() => '') : Promise.resolve(''),
       git($, [
         // The stash ref is drawn from the stash list instead, one row per stash
-        'log', ...(filter !== null ? [filter] : allBranches ? ['--exclude=refs/stash', '--all'] : []), '--topo-order', `-n${limit}`,
+        'log', ...(filter !== null ? [filter] : allBranches ? ['--exclude=refs/stash', '--all'] : []), '--topo-order', `-n${loadLimit}`,
         `--format=${FORMAT}`, DATE_ARGS[dateFormat], '--'
       ])
     ])
-    const repos = await listRepos($)
     const remotes = remoteList.split('\n').map(name => name.trim()).filter(Boolean).sort((a, b) => Number(b === 'origin') - Number(a === 'origin'))
     const forge = remotes[0] ? forgeOf(await git($, ['remote', 'get-url', remotes[0]]).catch(() => '')) : null
     // Where pull requests go: the remote's HEAD, else main or master, whichever exists
@@ -261,12 +296,13 @@ async function load ($: Engine) {
       forge,
       defaultBranch,
       repos,
+      ...(inFolder ? { inFolder: true as const } : {}),
       error: null,
       loadedAt: await $.clock.now()
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    graph = { commits: [], branch: '', changes: [], branches: [], localCount: 0, upstreams: {}, remotes: [], head: '', forge: null, defaultBranch: 'main', repos: await listRepos($).catch(() => []), error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
+    graph = { ...empty, error: /not a git repository/i.test(message) ? 'This folder is not a git repository.' : message, loadedAt: await $.clock.now() }
   }
   await $.state.set(GRAPH_REF, graph)
 
@@ -379,10 +415,17 @@ async function visibleRows ($: Engine) {
 
 /** j and k: open the next or the previous row, showing another page when the walk reaches it. */
 async function step ($: Engine, by: 1 | -1) {
-  const rows = await visibleRows($)
+  let rows = await visibleRows($)
   if (rows.length === 0) return
   const selected = await read($, SELECTED)
-  const at = rows.findIndex(commit => commit.hash === selected)
+  let at = rows.findIndex(commit => commit.hash === selected)
+  // j on the last commit loaded, where the history goes on: the next commits load, and the walk goes on
+  const graph = await read($, GRAPH)
+  if (by === 1 && at === rows.length - 1 && (await read($, QUERY)).trim() === '' && graph && isCut(graph, (await read($, LOAD_LIMIT)) ?? limit)) {
+    await loadMore($)
+    rows = await visibleRows($)
+    at = rows.findIndex(commit => commit.hash === selected)
+  }
   // With nothing open, either key starts at the top of the page drawn
   const next = at === -1 ? Math.min(rows.length - 1, await read($, PAGE_START)) : Math.min(rows.length - 1, Math.max(0, at + by))
   await reveal($, next)
@@ -451,22 +494,56 @@ async function readDiff ($: Engine, hash: string, file: FileChange): Promise<Non
 async function toggleAll ($: Engine) {
   await $.state.set(ALL_REF, !(await read($, ALL)))
   await $.state.set(FILTER_REF, null)
+  await $.state.set(LOAD_LIMIT_REF, null)
   await reload($)
 }
 
-/** The session's repo, then each submodule checked out in it, deepest last. */
-async function listRepos ($: Engine) {
+/**
+ * The repos the pane can draw: the session's repo, then each submodule checked out in it, deepest
+ * last. Where the session's folder is no repo, the repos among its folders, one level down, each
+ * followed by its submodules.
+ */
+async function listRepos ($: Engine): Promise<{ repos: Graph['repos']; inFolder: boolean }> {
   const cwd = await $.session.cwd()
   const root = (await gitIn($, cwd, ['rev-parse', '--show-toplevel']).catch(() => '')).trim()
-  if (root === '') return []
-  const submodules = parseSubmodules(await gitIn($, root, ['submodule', 'status', '--recursive']).catch(() => ''))
-  return [{ path: root, label: root.split('/').at(-1) ?? root }, ...submodules.map(path => ({ path: `${root}/${path}`, label: path }))]
+  if (root !== '') return { repos: await withSubmodules($, root, root.split('/').at(-1) ?? root, ''), inFolder: false }
+  const names = repoCandidates(await $.fs.list(cwd).catch(() => []))
+  // A repo's .git is a folder, or a file in a worktree or a submodule
+  const found = await Promise.all(names.map(async name => ((await $.fs.exists(`${cwd}/${name}/.git`).catch(() => false)) ? name : null)))
+  const repos = await Promise.all(found.filter((name): name is string => name !== null).map(name => withSubmodules($, `${cwd}/${name}`, name, `${name}/`)))
+  return { repos: repos.flat(), inFolder: true }
 }
 
-/** Draws another repo: what was open, picked or compared there does not carry over. */
-async function pickRepo ($: Engine, path: string) {
-  const graph = await read($, GRAPH)
-  await $.state.set(REPO_REF, path === graph?.repos[0]?.path ? null : path)
+/** A repo, then each submodule checked out in it, labelled with `prefix` before its path. */
+async function withSubmodules ($: Engine, path: string, label: string, prefix: string) {
+  const submodules = parseSubmodules(await gitIn($, path, ['submodule', 'status', '--recursive']).catch(() => ''))
+  return [{ path, label }, ...submodules.map(sub => ({ path: `${path}/${sub}`, label: `${prefix}${sub}` }))]
+}
+
+/** The repo last picked in the session's folder, when that folder holds several and it is still there. */
+async function rememberedRepo ($: Engine, repos: Graph['repos']) {
+  const picks = await $.store.get('repos').catch(() => undefined)
+  const path = typeof picks === 'object' && picks !== null ? (picks as Record<string, unknown>)[await $.session.cwd()] : undefined
+  return typeof path === 'string' && repos.some(item => item.path === path) ? path : null
+}
+
+/** Keeps the repo picked in a folder of repos, so the next /git-graph there draws it again. */
+async function rememberRepo ($: Engine, path: string) {
+  const saved = await $.store.get('repos').catch(() => undefined)
+  const picks = typeof saved === 'object' && saved !== null ? { ...(saved as Record<string, unknown>) } : {}
+  picks[await $.session.cwd()] = path
+  await $.store.set('repos', picks).catch(() => undefined)
+}
+
+/**
+ * Draws another repo: what was open, picked or compared there does not carry over. The session's
+ * own repo is drawn as none picked; in a folder of repos the pick is kept for next time.
+ */
+async function pickRepo ($: Engine, path: string, { inFolder, own }: { inFolder: boolean; own: string | undefined }) {
+  await $.state.set(REPO_REF, !inFolder && path === own ? null : path)
+  if (inFolder) await rememberRepo($, path)
+  await $.state.set(LOAD_LIMIT_REF, null)
+  await $.state.set(BRANCHES_OPEN_REF, false)
   await $.state.set(FILTER_REF, null)
   await $.state.set(COMPARE_REF, null)
   await $.state.set(REF_REF, null)
@@ -477,6 +554,11 @@ async function pickRepo ($: Engine, path: string) {
 
 /** The branch picker's value: `all`, `current`, or `ref:<branch>` to draw that branch alone. */
 async function pickBranches ($: Engine, value: string) {
+  // The branches past what the picker holds: the branch panel lists them all, found by name
+  if (value === 'sep:more') {
+    await $.state.set(PICKER_REDRAW_REF, (await read($, PICKER_REDRAW)) + 1)
+    return openBranches($)
+  }
   // A separator picks nothing: the picker draws again with what it showed
   if (value.startsWith('sep:')) return $.state.set(PICKER_REDRAW_REF, (await read($, PICKER_REDRAW)) + 1)
   if (value === 'all' || value === 'current') {
@@ -485,8 +567,35 @@ async function pickBranches ($: Engine, value: string) {
   } else {
     await $.state.set(FILTER_REF, value.slice(4))
   }
+  await $.state.set(BRANCHES_OPEN_REF, false)
   await $.state.set(PAGE_START_REF, 0)
+  // Another history: it loads as many commits as the option says again
+  await $.state.set(LOAD_LIMIT_REF, null)
   await reload($)
+}
+
+async function openBranches ($: Engine) {
+  await $.state.set(BRANCH_QUERY_REF, '')
+  await $.state.set(BRANCHES_OPEN_REF, true)
+}
+
+async function findBranch ($: Engine, value: string) {
+  await $.state.set(BRANCH_QUERY_REF, value)
+}
+
+/**
+ * The next `limit` commits past the last one loaded, read again from the top so the lanes run on;
+ * the page drawn stays, its last rows now followed by the new ones.
+ */
+async function loadMore ($: Engine) {
+  const loaded = (await read($, LOAD_LIMIT)) ?? limit
+  await $.state.set(LOAD_LIMIT_REF, loaded + limit)
+  await reload($)
+}
+
+/** The history loaded stops short of its first commit: as many commits came as were asked for. */
+function isCut (graph: Graph, loaded: number) {
+  return graph.commits.filter(commit => !commit.kind).length >= loaded
 }
 
 async function find ($: Engine, value: string) {
@@ -1011,6 +1120,9 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const renaming = await read($, RENAMING)
   const lastNote = await read($, NOTE)
   const pageStart = await read($, PAGE_START)
+  const branchesOpen = await read($, BRANCHES_OPEN)
+  const branchQuery = await read($, BRANCH_QUERY)
+  const loaded = (await read($, LOAD_LIMIT)) ?? limit
   const columns = Math.max(40, e.props.bodyColumns)
   const count = graph?.commits.filter(commit => !commit.kind).length ?? 0
   const typed = await read($, QUERY)
@@ -1025,9 +1137,11 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
         <Select
           key="repo"
           label="repo "
-          value={repo ?? graph.repos[0]?.path}
-          options={graph.repos.map(item => ({ value: item.path, label: item.label }))}
-          onSelect={(value: string) => pickRepo($, value)}
+          value={repo ?? (graph.inFolder ? undefined : graph.repos[0]?.path)}
+          options={fitOptions(graph.repos.map(item => ({ value: item.path, label: item.label })), repo ?? undefined, 'repos')}
+          onSelect={(value: string) => (value.startsWith('sep:')
+            ? read($, PICKER_REDRAW).then(count => $.state.set(PICKER_REDRAW_REF, count + 1))
+            : pickRepo($, value, { inFolder: Boolean(graph.inFolder), own: graph.repos[0]?.path }))}
         />
       )}
       {/* Where the repo stands on the left, what changes the view on the right; a narrow pane wraps the two */}
@@ -1036,7 +1150,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
         <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={1}>
           <Text color="green" bold wrap="truncate-end">{graph?.branch ? `⎇ ${graph.branch}` : 'Git Graph'}</Text>
           {graph && graph.changes.length > 0 && <Text color="yellow">{`● ${graph.changes.length} uncommitted`}</Text>}
-          {isDrawn && <Text dimColor>{`${count} commits${count >= limit ? ` (last ${limit})` : ''}`}</Text>}
+          {isDrawn && <Text dimColor>{`${count} commits${count >= loaded ? ` (last ${loaded})` : ''}`}</Text>}
         </Box>
         <Box flexDirection="row" columnGap={2} alignItems="center" flexShrink={0}>
           {Select && graph && graph.branches.length > 0
@@ -1044,14 +1158,14 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
               <Select
                 key="branches"
                 value={filter !== null ? `ref:${filter}` : allBranches ? 'all' : 'current'}
-                options={[
+                options={fitOptions([
                   { value: 'all', label: 'all branches' },
                   { value: 'current', label: 'current branch' },
                   ...(graph.localCount > 0 ? [{ value: 'sep:local', label: '── local ──' }] : []),
                   ...graph.branches.slice(0, graph.localCount).map(name => ({ value: `ref:${name}`, label: name })),
                   ...(graph.branches.length > graph.localCount ? [{ value: 'sep:remote', label: '── remote ──' }] : []),
                   ...graph.branches.slice(graph.localCount).map(name => ({ value: `ref:${name}`, label: name }))
-                ]}
+                ], filter !== null ? `ref:${filter}` : undefined, 'branches')}
                 onSelect={(value: string) => pickBranches($, value)}
               />
               )
@@ -1091,6 +1205,7 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
         </Box>
       )}
       {settingsOpen && drawSettings(ui, $, { compact, curves, avatars, showAuthor, showDate, dateFormat, muteMerges, muteOthers })}
+      {branchesOpen && isDrawn && graph && drawBranches(ui, $, graph, branchQuery, filter)}
       {compareBase !== null && (
         <Box flexDirection="row" columnGap={2}>
           <Text wrap="truncate-end"><Text color="cyan">{`⇄ comparing with ${compareBase === WORKTREE ? 'the working tree' : compareBase.slice(0, HASH_WIDTH)}`}</Text><Text dimColor>  · open another commit</Text></Text>
@@ -1103,6 +1218,20 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
 
   if (!graph) return <Box flexDirection="column">{header}<Text dimColor>Loading…</Text></Box>
   if (graph.error) return <Box flexDirection="column">{header}<Text color="red">{graph.error}</Text></Box>
+  // A folder of repos with none picked yet: each one as a button, where a surface has no picker too
+  if (graph.inFolder && repo === null) {
+    return (
+      <Box flexDirection="column">
+        {header}
+        <Text dimColor>{`This folder holds ${graph.repos.length} repos. Pick one to draw its history:`}</Text>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+          {graph.repos.map(item => (
+            <Button key={`pick-${item.path}`} label={item.label} onPress={() => pickRepo($, item.path, { inFolder: true, own: undefined })} />
+          ))}
+        </Box>
+      </Box>
+    )
+  }
   if (graph.commits.length === 0) return <Box flexDirection="column">{header}<Text dimColor>No commits yet.</Text></Box>
 
   if (query !== '' && found.length === 0) return <Box flexDirection="column">{header}<Text> </Text><Text dimColor>{`No commit in the last ${count} matches “${query}”.`}</Text></Box>
@@ -1111,6 +1240,8 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
   const start = Math.min(pageStart, Math.max(0, Math.floor((found.length - 1) / PAGE) * PAGE))
   const visible = found.slice(start, start + PAGE)
   const end = start + visible.length
+  // The last page of a history cut short: the next commits can load under it
+  const canLoadMore = end === found.length && query === '' && isCut(graph, loaded)
   // Compact drops the gap after every lane: half as wide, the junction glyphs still connect
   const cellsOf = (commit: Commit) => {
     // Found commits are not neighbours: their lanes would not connect, so each keeps its dot alone
@@ -1150,10 +1281,14 @@ async function drawPane ($: Engine, e: RenderOf<'Pane'>) {
       <Text> </Text>
       {start > 0 && <Button key="newer" label={`▴ newer ${Math.min(PAGE, start)}`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, Math.max(0, start - PAGE))} />}
       {rows}
-      {found.length > PAGE && (
-        <Box key="pages" flexDirection="row" columnGap={2}>
-          {end < found.length && <Button key="older" label={`older ${Math.min(PAGE, found.length - end)} ▾`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, end)} />}
+      {/* Under the last row too, both ways: the walk back is where the reading stopped */}
+      {(found.length > PAGE || canLoadMore) && (
+        <Box key="pages" flexDirection="row" columnGap={2} flexWrap="wrap">
+          {start > 0 && <Button key="newer-end" label={`▴ newer ${Math.min(PAGE, start)}`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, Math.max(0, start - PAGE))} />}
           <Text dimColor>{`${start + 1}–${end} of ${found.length}`}</Text>
+          {end < found.length && <Button key="older" label={`older ${Math.min(PAGE, found.length - end)} ▾`} plain dimColor onPress={() => $.state.set(PAGE_START_REF, end)} />}
+          {canLoadMore && <Button key="load-more" label={`⇣ load ${limit} more`} plain dimColor onPress={() => loadMore($)} />}
+          {canLoadMore && <Text dimColor>{`the history goes on past these ${loaded}`}</Text>}
         </Box>
       )}
     </Box>
@@ -1211,6 +1346,42 @@ function drawSetting (ui: Ui, key: string, label: string, controls: unknown[]) {
     <Box key={`setting-${key}`} flexDirection="row" columnGap={1}>
       <Box width={SETTING_LABEL_WIDTH} flexShrink={0}><Text dimColor>{label}</Text></Box>
       <Box flexDirection="row" columnGap={2} flexWrap="wrap" flexShrink={1}>{controls.filter(Boolean)}</Box>
+    </Box>
+  )
+}
+
+/**
+ * Every branch, past the 64 the branch picker holds: a field that finds them by name, then the
+ * ones it keeps, local apart from remote, most recent first; a press draws that branch alone.
+ */
+function drawBranches (ui: Ui, $: Engine, graph: Graph, query: string, filter: string | null) {
+  const { Box, Text, Button, Input } = ui
+  const local = branchesMatching(graph.branches.slice(0, graph.localCount), query)
+  const remote = branchesMatching(graph.branches.slice(graph.localCount), query)
+  const total = local.length + remote.length
+  // Only so many at once: the field narrows the rest
+  const shownLocal = local.slice(0, BRANCH_LIST)
+  const shownRemote = remote.slice(0, Math.max(0, BRANCH_LIST - shownLocal.length))
+  const branch = (name: string) => (
+    <Button key={`branch-${name}`} label={name} plain dimColor={name !== filter} onPress={() => pickBranches($, `ref:${name}`)} />
+  )
+  return (
+    <Box key="branches-panel" flexDirection="column" marginTop={1}>
+      <Box flexDirection="row" columnGap={2} alignItems="center">
+        <Text bold>{`Branches · ${graph.branches.length}`}</Text>
+        {Input && (
+          <Box flexGrow={1}>
+            <Input key="branch-find" placeholder="find a branch by name" value={query} submitLabel="find" autoFocus onInput={(value: string) => findBranch($, value)} onSubmit={(value: string) => findBranch($, value)} />
+          </Box>
+        )}
+        <Button key="branches-close" label="✕" plain dimColor onPress={() => $.state.set(BRANCHES_OPEN_REF, false)} />
+      </Box>
+      {shownLocal.length > 0 && <Text dimColor>── local ──</Text>}
+      {shownLocal.length > 0 && <Box flexDirection="row" columnGap={2} flexWrap="wrap">{shownLocal.map(branch)}</Box>}
+      {shownRemote.length > 0 && <Text dimColor>── remote ──</Text>}
+      {shownRemote.length > 0 && <Box flexDirection="row" columnGap={2} flexWrap="wrap">{shownRemote.map(branch)}</Box>}
+      {total === 0 && <Text dimColor>{`No branch holds “${query.trim()}”.`}</Text>}
+      {total > shownLocal.length + shownRemote.length && <Text dimColor>{`… ${total - shownLocal.length - shownRemote.length} more${Input ? ': type to narrow them' : ''}`}</Text>}
     </Box>
   )
 }
